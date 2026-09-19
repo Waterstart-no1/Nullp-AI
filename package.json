@@ -1,0 +1,17 @@
+{
+  "name": "nullp-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nullp - an AI that warns you, informs you, and sometimes tells you what to do.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

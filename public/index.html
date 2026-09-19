@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nullp</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⬡</text></svg>" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="mark">⬡</span>
+      <div>
+        <h1>Nullp</h1>
+        <p id="status" class="status">connecting…</p>
+      </div>
+    </div>
+
+    <button class="btn primary block" id="newChat">＋ New chat</button>
+    <input class="search" id="search" type="search" placeholder="Search chats…" aria-label="Search chats" />
+
+    <nav class="chats" id="chatList" aria-label="Saved chats"></nav>
+
+    <div class="sidebar-foot">
+      <button class="btn ghost" id="themeToggle" title="Toggle theme">◐ Theme</button>
+      <button class="btn ghost" id="wipe" title="Delete every chat">Wipe all</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="btn ghost only-narrow" id="menuToggle" aria-label="Toggle sidebar">☰</button>
+      <h2 id="chatTitle">New chat</h2>
+      <div class="spacer"></div>
+      <label class="mode">
+        Mode
+        <select id="mode" aria-label="Response mode">
+          <option value="balanced">Balanced</option>
+          <option value="paranoid">Paranoid</option>
+          <option value="brief">Brief</option>
+          <option value="explain">Explain</option>
+        </select>
+      </label>
+      <button class="btn ghost" id="exportBtn" title="Download this chat as Markdown">↓ Export</button>
+      <button class="corner-btn" id="voice" title="Talk to Nullp (V)" aria-label="Talk to Nullp">🎙</button>
+    </header>
+
+    <section class="transcript" id="transcript" aria-live="polite"></section>
+
+    <div class="empty" id="empty">
+      <div class="empty-mark">⬡</div>
+      <h3>Nullp watches your back.</h3>
+      <p>Tell it what you're about to do. It warns you, informs you, and sometimes tells you what to do.</p>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <footer class="composer">
+      <div class="usage" id="usage"></div>
+      <div class="input-row">
+        <textarea id="input" rows="1" placeholder="What are you about to do?" aria-label="Message Nullp"></textarea>
+        <button class="btn primary send" id="send" title="Send (Enter)">Send</button>
+        <button class="btn danger send" id="stop" hidden title="Stop generating">Stop</button>
+      </div>
+      <div class="hints">
+        <span><kbd>Enter</kbd> send</span>
+        <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
+        <span><kbd>Ctrl</kbd>+<kbd>K</kbd> new chat</span>
+        <button class="linkbtn" id="regen">↻ Regenerate</button>
+      </div>
+    </footer>
+  </main>
+
+  <div class="playing" id="playing" hidden>
+    <span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <span class="playing-text" id="playingText">Listening…</span>
+    <button class="playing-stop" id="playingStop" title="Stop">✕</button>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
