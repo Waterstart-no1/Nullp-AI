@@ -184,8 +184,10 @@ stopped from reaching the game.
 
 **Nullp must be running** (`npm start`) for the widget to answer; if it is not,
 the widget says so and the game is otherwise unaffected. Because the game and
-Nullp are different origins, the server sends permissive CORS headers - it is a
-localhost dev server, so do not expose it to an untrusted network.
+Nullp are different origins, the server allows cross-origin calls - but only
+from pages on this machine (`localhost`, `127.0.0.1`, `file://`). Any other
+website is refused, so it cannot read your notes or spend your key. The server
+listens on `127.0.0.1` only; set `HOST=0.0.0.0` to expose it deliberately.
 
 The server also hosts the games themselves at `/games`, so the widget runs
 same-origin - no CORS, no `file://` restrictions, one thing to start. A game

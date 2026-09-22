@@ -8,9 +8,15 @@ import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// Must run before any process.env read below, or .env overrides are ignored.
+loadDotEnv(path.join(HERE, ".env"));
+
 const PUBLIC = path.join(HERE, "public");
 const GAMES_DIR = path.dirname(HERE); // the folder Nullp-AI itself sits in
 const PORT = Number(process.env.PORT) || 4173;
+// Loopback only by default: the API reads your notes, fetches URLs and spends
+// your API key, so it must not be reachable from the rest of the network.
+const HOST = process.env.HOST || "127.0.0.1";
 const MODEL = process.env.NULLP_MODEL || "claude-opus-5";
 
 // Local fallback: a model running on this machine via Ollama. Used whenever
@@ -20,8 +26,6 @@ const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const LOCAL_MODEL = process.env.NULLP_LOCAL_MODEL || "llama3.2:3b";
 // Camera mode: a small vision model describes the frame, the text model judges it.
 const VISION_MODEL = process.env.NULLP_VISION_MODEL || "moondream";
-
-loadDotEnv(path.join(HERE, ".env"));
 
 const hasCredentials = Boolean(
   process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN,
@@ -165,14 +169,26 @@ function gamesIndex(res) {
 
 function serveGame(pathname, res) {
   const [, , slug, ...rest] = pathname.split("/");
-  const game = discoverGames().find((g) => g.slug === decodeURIComponent(slug));
+  const game = discoverGames().find((g) => g.slug === safeDecode(slug));
   if (!game) return json(res, 404, { error: "no such game" });
 
-  const relative = rest.join("/") || "index.html";
-  const file = path.join(game.root, relative.endsWith("/") ? `${relative}index.html` : relative);
-  if (!file.startsWith(game.root)) return json(res, 403, { error: "forbidden" });
+  const relative = safeDecode(rest.join("/"));
+  if (relative === null) return json(res, 400, { error: "bad path" });
+  const file = path.join(game.root, !relative || relative.endsWith("/") ? `${relative}index.html` : relative);
+  if (!isInside(file, game.root)) return json(res, 403, { error: "forbidden" });
   serveFile(file, res);
 }
+
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
+// A bare startsWith lets "/x/public" match "/x/public-secrets/...".
+const isInside = (file, dir) => file === dir || file.startsWith(dir + path.sep);
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -180,13 +196,45 @@ const escapeHtml = (s) =>
 // -------------------------------------------------------------------- routing
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    await route(req, res);
+  } catch (err) {
+    // An uncaught rejection here would kill the process for every client.
+    console.error(err);
+    if (!res.headersSent) json(res, 500, { error: "internal error" });
+    else res.end();
+  }
+});
 
-  // The game widget runs on a different origin (or file://), so the local
-  // server answers cross-origin calls. This is a localhost dev server - do not
-  // expose it to a network you do not control.
-  res.setHeader("Access-Control-Allow-Origin", "*");
+// Pages on this machine (other localhost ports, or file:// which sends
+// "null") may call the API. Any other website may not: it could read your
+// notes, spend your API key and use /api/fetch to reach your local network.
+function isLocalOrigin(origin) {
+  if (!origin || origin === "null") return true;
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// DNS rebinding: a hostile domain resolving to 127.0.0.1 is "same origin".
+const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host || "");
+
+async function route(req, res) {
+  const origin = req.headers.origin;
+  if (!isLocalOrigin(origin) || (HOST === "127.0.0.1" && !isLocalHost(req.headers.host))) {
+    return json(res, 403, { error: "Nullp only answers pages on this machine" });
+  }
+  const url = new URL(req.url, "http://localhost");
+
+  // The game widget may run on another local origin (or file://).
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     return res.end();
@@ -237,9 +285,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET") return serveStatic(url.pathname, res);
 
   return json(res, 405, { error: "method not allowed" });
-});
+}
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n  Nullp is listening on http://localhost:${PORT}`);
   console.log(`  Games:  http://localhost:${PORT}/games`);
   if (hasCredentials) {
@@ -301,7 +349,7 @@ async function handleChat(req, res) {
 
   // The caller may pin an engine: "local" even when a Claude key exists.
   const wantLocal = body.engine === "local";
-  const localModel = typeof body.model === "string" && body.model ? body.model : null;
+  const localModel = wantLocal && typeof body.model === "string" && body.model ? body.model : null;
 
   if (!client || wantLocal) {
     if (await localAvailable(localModel)) {
@@ -412,8 +460,7 @@ async function localAvailable(wanted) {
       signal: AbortSignal.timeout(1500),
     });
     const names = (await res.json())?.models?.map((m) => m.name) ?? [];
-    const target = (wanted || LOCAL_MODEL).split(":")[0];
-    const ok = names.some((n) => n.startsWith(target));
+    const ok = names.some((n) => sameModel(n, wanted || LOCAL_MODEL));
     if (!wanted) {
       localSeen = ok;
       localSeenAt = Date.now();
@@ -426,6 +473,13 @@ async function localAvailable(wanted) {
     }
     return false;
   }
+}
+
+// Ollama names carry a tag ("llama3.2:3b", "moondream:latest"). An untagged
+// name means :latest; a tagged one must match exactly.
+function sameModel(installed, wanted) {
+  const tagged = wanted.includes(":") ? wanted : `${wanted}:latest`;
+  return installed === wanted || installed === tagged;
 }
 
 // A small local model needs the format spelled out harder than Claude does.
@@ -513,8 +567,8 @@ function offlineReply(res, lastMessage) {
   const lines = [
     "[warn] Nullp has no model connected, so this is a canned reply - not real analysis.",
     `[info] You asked: "${String(lastMessage).slice(0, 120)}"`,
-    "[info] Nullp needs an Anthropic API key to think. Everything else already works.",
-    "[do] Copy .env.example to .env and put your key in ANTHROPIC_API_KEY.",
+    "[info] Nullp needs a model to think: a local one via Ollama, or an Anthropic API key.",
+    `[do] Run: ollama serve, then ollama pull ${LOCAL_MODEL}. Or put ANTHROPIC_API_KEY in .env.`,
     "[do] Restart the server with: npm start",
   ];
   let i = 0;
@@ -794,12 +848,21 @@ function json(res, status, payload) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = "";
+    // Collect bytes and decode once: decoding per chunk splits multi-byte
+    // characters (Chinese, emoji) that straddle a chunk boundary.
+    const chunks = [];
+    let size = 0;
     req.on("data", (chunk) => {
-      data += chunk;
-      if (data.length > 4e6) reject(new Error("body too large")); // room for one camera frame
+      size += chunk.length;
+      if (size > 4e6) {
+        // room for one camera frame
+        reject(new Error("body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
     });
-    req.on("end", () => resolve(data));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -811,12 +874,25 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 function serveStatic(pathname, res) {
-  const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const rel = safeDecode(pathname === "/" ? "index.html" : pathname.replace(/^\/+/, ""));
+  if (rel === null) return json(res, 400, { error: "bad path" });
   const file = path.join(PUBLIC, rel);
-  if (!file.startsWith(PUBLIC)) return json(res, 403, { error: "forbidden" });
+  if (!isInside(file, PUBLIC)) return json(res, 403, { error: "forbidden" });
 
   serveFile(file, res);
 }
@@ -825,7 +901,7 @@ function serveFile(file, res) {
   fs.readFile(file, (err, data) => {
     if (err) return json(res, 404, { error: "not found" });
     res.writeHead(200, {
-      "Content-Type": TYPES[path.extname(file)] || "application/octet-stream",
+      "Content-Type": TYPES[path.extname(file).toLowerCase()] || "application/octet-stream",
       "Content-Length": data.length,
     });
     res.end(data);

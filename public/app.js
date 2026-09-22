@@ -309,17 +309,21 @@ async function submit() {
   if (pending.some((a) => a.loading)) return; // still reading a file or link
 
   await readLinksIn(text);
+  if (inFlight) return; // something else started while the links were loading
   const attachments = pending.filter((a) => !a.error).map(({ name, kind, text: body }) => ({ name, kind, text: body }));
+  // Only failed attachments and no text: leave them on screen with their errors.
+  if (!text && !attachments.length) return;
   clearPending();
 
   const chat = active();
+  const content = text || `(Read ${attachments.map((a) => a.name).join(", ")} and warn me about it.)`;
   chat.messages.push({
     role: "user",
-    content: text || `(Read ${attachments.map((a) => a.name).join(", ")} and warn me about it.)`,
+    content,
     ...(attachments.length ? { attachments } : {}),
   });
   if (chat.title === "New chat") {
-    chat.title = text.length > 38 ? `${text.slice(0, 38)}…` : text;
+    chat.title = content.length > 38 ? `${content.slice(0, 38)}…` : content;
   }
   chat.updated = Date.now();
   el.input.value = "";
@@ -366,7 +370,9 @@ async function stream(chat) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         // Failed turns stay on screen but never go back to the model.
-        messages: chat.messages.filter((m) => !m.failed),
+        messages: chat.messages
+          .filter((m) => !m.failed)
+          .map(({ role, content }) => ({ role, content })),
         mode: el.mode.value,
         attachments: [...chat.messages].reverse().find((m) => m.role === "user")?.attachments ?? [],
         image: [...chat.messages].reverse().find((m) => m.role === "user")?.image,
@@ -480,7 +486,7 @@ function exportChat() {
   a.href = url;
   a.download = `${chat.title.replace(/[^\w\- ]+/g, "").trim() || "nullp-chat"}.md`;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // --------------------------------------------------------------------- wiring
@@ -773,7 +779,8 @@ async function addFiles(files) {
 
 // Every link in the message is fetched by the local server and attached.
 async function readLinksIn(text) {
-  const urls = [...new Set(text.match(URL_RE) || [])].slice(0, 2);
+  const found = (text.match(URL_RE) || []).map((u) => u.replace(/[.,;:!?。，；：！？]+$/, ""));
+  const urls = [...new Set(found)].slice(0, 2);
   const jobs = urls
     .filter((url) => !pending.some((a) => a.url === url))
     .map(async (url) => {
@@ -925,7 +932,7 @@ function backup() {
   a.href = URL.createObjectURL(blob);
   a.download = `nullp-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 async function restore(file) {
@@ -937,9 +944,15 @@ async function restore(file) {
     return;
   }
   const incoming = Array.isArray(data?.chats) ? data.chats : [];
-  const valid = incoming.filter(
-    (c) => c && typeof c.id === "string" && Array.isArray(c.messages) && typeof c.title === "string",
-  );
+  const valid = incoming
+    .filter((c) => c && typeof c.id === "string" && Array.isArray(c.messages) && typeof c.title === "string")
+    .map((c) => ({
+      ...c,
+      updated: Number(c.updated) || Date.now(),
+      messages: c.messages.filter(
+        (m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+      ),
+    }));
   const known = new Set(state.chats.map((c) => c.id));
   const added = valid.filter((c) => !known.has(c.id));
   state.chats.push(...added);
@@ -947,6 +960,7 @@ async function restore(file) {
   if (added.length) state.chats = state.chats.filter((c) => c.messages.length || c.id === state.activeId);
   save();
   renderChats();
+  renderTranscript(); // the active chat may have been the blank one just dropped
   el.usage.textContent = `restored ${added.length} chat${added.length === 1 ? "" : "s"}` +
     (valid.length - added.length ? `, skipped ${valid.length - added.length} already here` : "");
 }
@@ -1077,7 +1091,7 @@ async function watchTick() {
         const { text, seen } = await quietAsk(frame);
         const stamp = new Date().toLocaleTimeString();
         const warns = (text.match(/^\s*\[warn\]/gim) || []).length;
-        if (warns && cam.watching) {
+        if (warns && cam.watching && !inFlight) {
           // The small model sometimes tacks the "all clear" sentinel onto a warning.
           const cleaned = text
             .split("\n")
@@ -1106,11 +1120,12 @@ async function watchTick() {
       }
     }
   }
+  clearTimeout(cam.timer);
   if (cam.watching) cam.timer = setTimeout(watchTick, WATCH_EVERY_MS);
 }
 
 function startWatch() {
-  if (!cam.stream) return;
+  if (!cam.stream || cam.watching) return;
   cam.watching = true;
   el.camWatch.classList.add("on");
   el.camWatch.textContent = "👁 Stop watching";
