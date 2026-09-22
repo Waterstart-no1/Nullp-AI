@@ -24,7 +24,8 @@ const el = {
   attachments: $("attachments"), drop: $("drop"),
   camBtn: $("camBtn"), camSheet: $("camSheet"), camVideo: $("camVideo"), camSnap: $("camSnap"),
   camWatch: $("camWatch"), camFlip: $("camFlip"), camClose: $("camClose"), camState: $("camState"),
-  camLive: $("camLive"),
+  camLive: $("camLive"), camTitle: $("camTitle"), camSub: $("camSub"), camView: $("camView"),
+  screenBtn: $("screenBtn"), placeBtn: $("placeBtn"),
 };
 
 const KEY = "nullp.v1";
@@ -209,7 +210,7 @@ function turnNode(msg, index) {
       const img = document.createElement("img");
       img.className = "shot";
       img.src = msg.image;
-      img.alt = "Camera frame sent to Nullp";
+      img.alt = "Picture sent to Nullp";
       wrap.append(img);
     }
     if (msg.attachments?.length) {
@@ -234,6 +235,11 @@ function turnNode(msg, index) {
   tools.append(
     linkButton("Copy", () => navigator.clipboard?.writeText(msg.content)),
   );
+  // Phones and some desktops can hand an answer to another app.
+  if (msg.role === "assistant" && navigator.share) {
+    tools.append(linkButton("Share", () =>
+      navigator.share({ title: "Nullp", text: msg.content }).catch(() => {})));
+  }
   if (msg.role === "user") {
     tools.append(linkButton("Edit & resend", () => {
       if (inFlight) return;
@@ -309,17 +315,27 @@ async function submit() {
   if (pending.some((a) => a.loading)) return; // still reading a file or link
 
   await readLinksIn(text);
-  const attachments = pending.filter((a) => !a.error).map(({ name, kind, text: body }) => ({ name, kind, text: body }));
+  const ok = pending.filter((a) => !a.error);
+  // One picture per message - that is what the model is handed.
+  const image = ok.find((a) => a.kind === "image")?.image;
+  const attachments = ok
+    .filter((a) => a.kind !== "image")
+    .map(({ name, kind, text: body }) => ({ name, kind, text: body }));
   clearPending();
 
   const chat = active();
+  const fallback = image && !attachments.length
+    ? "What is in this picture? Warn me about anything risky."
+    : `(Read ${[...(image ? ["the picture"] : []), ...attachments.map((a) => a.name)].join(", ")} and warn me about it.)`;
   chat.messages.push({
     role: "user",
-    content: text || `(Read ${attachments.map((a) => a.name).join(", ")} and warn me about it.)`,
+    content: text || fallback,
     ...(attachments.length ? { attachments } : {}),
+    ...(image ? { image } : {}),
   });
   if (chat.title === "New chat") {
-    chat.title = text.length > 38 ? `${text.slice(0, 38)}…` : text;
+    const title = text || chat.messages.at(-1).content;
+    chat.title = title.length > 38 ? `${title.slice(0, 38)}…` : title;
   }
   chat.updated = Date.now();
   el.input.value = "";
@@ -366,7 +382,9 @@ async function stream(chat) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         // Failed turns stay on screen but never go back to the model.
-        messages: chat.messages.filter((m) => !m.failed),
+        // Pictures from earlier turns stay out: only the latest one is looked
+        // at, and a chat full of screenshots would blow the body limit.
+        messages: chat.messages.filter((m) => !m.failed).map(({ role, content }) => ({ role, content })),
         mode: el.mode.value,
         attachments: [...chat.messages].reverse().find((m) => m.role === "user")?.attachments ?? [],
         image: [...chat.messages].reverse().find((m) => m.role === "user")?.image,
@@ -712,8 +730,15 @@ const URL_RE = /\bhttps?:\/\/[^\s<>"'）)]+/gi;
 function fileChip(a, onRemove) {
   const chip = document.createElement("span");
   chip.className = `chip-file${a.loading ? " loading" : ""}${a.error ? " bad" : ""}`;
-  chip.title = a.error || (a.kind === "url" ? a.url : `${a.text.length.toLocaleString()} characters`);
-  const icon = a.kind === "url" ? "🔗" : "📄";
+  chip.title = a.error ||
+    (a.kind === "url" ? a.url : a.kind === "image" ? "picture" : a.kind === "location" ? a.text : `${(a.text || "").length.toLocaleString()} characters`);
+  let icon = { url: "🔗", location: "📍", image: "🖼" }[a.kind] || "📄";
+  if (a.kind === "image" && a.image) {
+    icon = document.createElement("img");
+    icon.className = "chip-thumb";
+    icon.src = a.image;
+    icon.alt = "";
+  }
   const label = document.createElement("b");
   label.textContent = a.loading ? `${a.name} — reading…` : a.error ? `${a.name} — ${a.error}` : a.name;
   chip.append(icon, label);
@@ -747,6 +772,10 @@ function clearPending() {
 
 async function addFiles(files) {
   for (const file of files) {
+    if (file.type.startsWith("image/")) {
+      await addImage(file);
+      continue;
+    }
     const entry = { name: file.name, kind: "file", text: "", loading: true };
     pending.push(entry);
     renderPending();
@@ -769,6 +798,36 @@ async function addFiles(files) {
     }
     renderPending();
   }
+}
+
+// A photo is shrunk to the same kind of JPEG a camera frame is, so it fits in
+// localStorage and goes down the exact same path to the model.
+async function addImage(file) {
+  // Only one picture rides along per message - a new one replaces the old.
+  const old = pending.findIndex((a) => a.kind === "image");
+  if (old !== -1) pending.splice(old, 1);
+
+  const entry = { name: file.name || "pasted picture", kind: "image", loading: true };
+  pending.push(entry);
+  renderPending();
+  try {
+    // Not <img>.decode(): that stalls in a background tab.
+    const bitmap = await createImageBitmap(file);
+    Object.assign(entry, { loading: false, image: toJpeg(bitmap, bitmap.width, bitmap.height, 1024) });
+    bitmap.close();
+  } catch {
+    Object.assign(entry, { loading: false, error: "cannot open this picture format" });
+  }
+  renderPending();
+}
+
+function toJpeg(source, width, height, maxSide) {
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(width * scale);
+  c.height = Math.round(height * scale);
+  c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.7);
 }
 
 // Every link in the message is fetched by the local server and attached.
@@ -805,6 +864,13 @@ el.attachFile.onchange = () => {
 
 // A big paste becomes an attachment instead of flooding the input box.
 el.input.addEventListener("paste", (e) => {
+  // A screenshot on the clipboard becomes the message's picture.
+  const pictures = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (pictures.length) {
+    e.preventDefault();
+    addImage(pictures[0]);
+    return;
+  }
   const text = e.clipboardData?.getData("text") ?? "";
   if (text.length < 2500) return;
   e.preventDefault();
@@ -829,6 +895,56 @@ window.addEventListener("drop", (e) => {
   el.drop.hidden = true;
   if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
 });
+
+// ------------------------------------------------------------------ location
+// 📍 attaches where you are, so "is it safe to walk here now" has an answer.
+// The coordinates go to OpenStreetMap once to turn them into a place name.
+
+async function addLocation() {
+  if (pending.some((a) => a.kind === "location" && a.loading)) return;
+  const old = pending.findIndex((a) => a.kind === "location");
+  if (old !== -1) pending.splice(old, 1);
+
+  const entry = { name: "your location", kind: "location", text: "", loading: true };
+  pending.push(entry);
+  renderPending();
+
+  try {
+    const pos = await new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 60000,
+      }),
+    );
+    const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+    let place = "";
+    try {
+      const res = await fetch(`/api/place?lat=${lat}&lon=${lon}`);
+      if (res.ok) place = (await res.json()).name || "";
+    } catch {
+      /* no place name - the coordinates still go along */
+    }
+    Object.assign(entry, {
+      loading: false,
+      name: place ? place.split(",").slice(0, 2).join(",") : `${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+      text: [
+        place ? `Place: ${place}` : "",
+        `Coordinates: ${lat.toFixed(5)}, ${lon.toFixed(5)} (accurate to about ${Math.round(accuracy)} m)`,
+        `Local time: ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+      ].filter(Boolean).join("\n"),
+    });
+  } catch (err) {
+    Object.assign(entry, {
+      loading: false,
+      error: err.code === 1 ? "location blocked — allow it in site settings" : "could not get a location",
+    });
+  }
+  renderPending();
+}
+
+el.placeBtn.onclick = addLocation;
+el.placeBtn.hidden = !navigator.geolocation;
 
 // --------------------------------------------------------------------- brain
 // Pick which model answers: Claude when there is a key, or any local model.
@@ -958,42 +1074,77 @@ el.restoreFile.onchange = () => {
   el.restoreFile.value = "";
 };
 
-// -------------------------------------------------------------------- camera
-// Nullp looks through the camera. One-off: snap a frame and ask about it.
-// Watch mode: look every few seconds, stay silent unless something is wrong.
+// ------------------------------------------------------------ camera / screen
+// Nullp looks - through the camera, or at your screen. One-off: snap a frame
+// and ask about it. Watch mode: look every few seconds, stay silent unless
+// something is wrong.
 
-const cam = { stream: null, facing: "user", watching: false, timer: null, busy: false, lastSpoke: 0 };
+const cam = { stream: null, source: "camera", facing: "user", watching: false, timer: null, busy: false, lastSpoke: 0 };
 const WATCH_EVERY_MS = 12000;
-const WATCH_PROMPT =
-  "Look at the camera view. If something is actually risky, warn me in one or two lines. " +
-  "If nothing is risky, reply exactly: [info] All clear.";
+const SOURCES = {
+  camera: {
+    title: "📷 Camera mode",
+    sub: "Nullp looks, then warns and informs. Nothing is recorded or kept except the frame you send.",
+    icon: "📷",
+    size: 512, // small enough for localStorage, big enough to read
+    question: "What do you see? Warn me about anything risky.",
+    watch:
+      "Look at the camera view. If something is actually risky, warn me in one or two lines. " +
+      "If nothing is risky, reply exactly: [info] All clear.",
+  },
+  screen: {
+    title: "🖥 Screen mode",
+    sub: "Nullp looks at the screen or window you share. Watch keeps going while you work in another window.",
+    icon: "🖥",
+    size: 1280, // text on a screen is unreadable any smaller
+    question: "Look at my screen. Warn me about anything risky - scams, phishing, dangerous commands, bad settings.",
+    watch:
+      "This is my screen. If something on it is actually risky - a phishing or scam page, a fake " +
+      "warning, a dangerous command, a payment or permission prompt I should think twice about - " +
+      "warn me in one or two lines. If nothing is risky, reply exactly: [info] All clear.",
+  },
+};
 
-async function openCamera() {
+async function openLook(source) {
+  cam.source = source;
+  const s = SOURCES[source];
+  el.camTitle.textContent = s.title;
+  el.camSub.textContent = s.sub;
+  el.camView.classList.toggle("screen", source === "screen");
+  el.camFlip.hidden = source === "screen";
   el.camSheet.hidden = false;
   await startStream();
 }
 
 async function startStream() {
   stopStream();
-  el.camState.textContent = "starting camera…";
-  if (!navigator.mediaDevices?.getUserMedia) {
-    el.camState.textContent = "this browser has no camera access";
+  const screen = cam.source === "screen";
+  el.camState.textContent = screen ? "pick a screen or window to share…" : "starting camera…";
+  const api = screen ? navigator.mediaDevices?.getDisplayMedia : navigator.mediaDevices?.getUserMedia;
+  if (!api) {
+    el.camState.textContent = screen ? "this browser cannot share the screen" : "this browser has no camera access";
     return;
   }
   try {
-    cam.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: cam.facing, width: { ideal: 1280 } },
-      audio: false,
-    });
+    cam.stream = screen
+      ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false })
+      : await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: cam.facing, width: { ideal: 1280 } },
+          audio: false,
+        });
+    // "Stop sharing" in the browser's own bar ends the track - follow it.
+    cam.stream.getVideoTracks()[0]?.addEventListener("ended", closeLook);
     el.camVideo.srcObject = cam.stream;
     el.camState.textContent = "ready — ask a question in the box, or just snap";
   } catch (err) {
     el.camState.textContent =
       err.name === "NotAllowedError"
-        ? "camera blocked — allow it in the browser's site settings"
+        ? screen
+          ? "screen sharing was cancelled or blocked"
+          : "camera blocked — allow it in the browser's site settings"
         : err.name === "NotFoundError"
           ? "no camera found"
-          : `camera error: ${err.message}`;
+          : `${screen ? "screen" : "camera"} error: ${err.message}`;
   }
 }
 
@@ -1003,39 +1154,46 @@ function stopStream() {
   el.camVideo.srcObject = null;
 }
 
-function closeCamera() {
+function closeLook() {
   stopWatch();
   stopStream();
   el.camSheet.hidden = true;
 }
 
-// One size for everything: small enough for localStorage, big enough to read.
-function grabFrame() {
+async function grabFrame() {
+  const size = SOURCES[cam.source].size;
+  // A background tab may stop painting the <video>; ImageCapture reads the
+  // track directly, which is what lets screen watch run while you work elsewhere.
+  const track = cam.stream?.getVideoTracks()[0];
+  if (document.hidden && track && "ImageCapture" in window) {
+    try {
+      const bitmap = await new ImageCapture(track).grabFrame();
+      return toJpeg(bitmap, bitmap.width, bitmap.height, size);
+    } catch {
+      /* fall through to the video element */
+    }
+  }
   const v = el.camVideo;
   if (!v.videoWidth) return null;
-  const scale = Math.min(1, 512 / v.videoWidth);
-  const c = document.createElement("canvas");
-  c.width = Math.round(v.videoWidth * scale);
-  c.height = Math.round(v.videoHeight * scale);
-  c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
-  return c.toDataURL("image/jpeg", 0.65);
+  return toJpeg(v, v.videoWidth, v.videoHeight, size);
 }
 
 async function snapAndAsk() {
   if (inFlight) return;
-  const frame = grabFrame();
+  const frame = await grabFrame();
   if (!frame) {
-    el.camState.textContent = "no picture yet — is the camera on?";
+    el.camState.textContent = "no picture yet — is it on?";
     return;
   }
-  const question = el.input.value.trim() || "What do you see? Warn me about anything risky.";
+  const s = SOURCES[cam.source];
+  const question = el.input.value.trim() || s.question;
   el.input.value = "";
   autosize();
-  closeCamera();
+  closeLook();
 
   const chat = active();
   chat.messages.push({ role: "user", content: question, image: frame });
-  if (chat.title === "New chat") chat.title = `📷 ${question.slice(0, 34)}`;
+  if (chat.title === "New chat") chat.title = `${s.icon} ${question.slice(0, 34)}`;
   chat.updated = Date.now();
   save();
   renderChats();
@@ -1051,7 +1209,7 @@ async function quietAsk(frame) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      messages: [{ role: "user", content: WATCH_PROMPT }],
+      messages: [{ role: "user", content: SOURCES[cam.source].watch }],
       mode: "brief",
       image: frame,
       ...brainChoice(),
@@ -1068,8 +1226,10 @@ async function quietAsk(frame) {
 
 async function watchTick() {
   if (!cam.watching) return;
-  if (!inFlight && !cam.busy && !document.hidden) {
-    const frame = grabFrame();
+  // Camera watch rests while the tab is hidden; screen watch is FOR that time.
+  const resting = document.hidden && cam.source === "camera";
+  if (!inFlight && !cam.busy && !resting) {
+    const frame = await grabFrame();
     if (frame) {
       cam.busy = true;
       el.camState.textContent = "looking…";
@@ -1084,7 +1244,8 @@ async function watchTick() {
             .filter((l) => !/^\s*\[info\]\s*all clear\.?\s*$/i.test(l))
             .join("\n");
           const chat = active();
-          chat.messages.push({ role: "user", content: "👁 Watch mode", image: frame });
+          const label = cam.source === "screen" ? "👁 Watching the screen" : "👁 Watch mode";
+          chat.messages.push({ role: "user", content: label, image: frame });
           chat.messages.push({ role: "assistant", content: cleaned, ...(seen ? { seen } : {}) });
           chat.updated = Date.now();
           save();
@@ -1092,9 +1253,10 @@ async function watchTick() {
           renderTranscript();
           el.camState.textContent = `⚠ ${warns} warning${warns > 1 ? "s" : ""} at ${stamp} — see the chat`;
           // Speak up, but not every tick about the same thing.
-          if (voice.canTalk && Date.now() - cam.lastSpoke > 30000) {
+          if (Date.now() - cam.lastSpoke > 30000) {
             cam.lastSpoke = Date.now();
-            voice.say(cleaned);
+            alertOutside(cleaned);
+            if (voice.canTalk) voice.say(cleaned);
           }
         } else if (cam.watching) {
           el.camState.textContent = `all clear · ${stamp}`;
@@ -1109,8 +1271,28 @@ async function watchTick() {
   if (cam.watching) cam.timer = setTimeout(watchTick, WATCH_EVERY_MS);
 }
 
+// Reach the person when they are not looking at Nullp: a system notification
+// when the tab is hidden, a buzz on a phone.
+function alertOutside(text) {
+  navigator.vibrate?.([180, 90, 180]);
+  if (!document.hidden || !("Notification" in window) || Notification.permission !== "granted") return;
+  const first = text.split("\n").find((l) => /^\s*\[warn\]/i.test(l)) || text.split("\n")[0];
+  const note = new Notification("⚠ Nullp", {
+    body: first.replace(/^\s*\[\w+\]\s*/, ""),
+    tag: "nullp-watch", // replace, don't stack
+  });
+  note.onclick = () => {
+    window.focus();
+    note.close();
+  };
+}
+
 function startWatch() {
   if (!cam.stream) return;
+  // Ask now, while there is a click to justify the prompt.
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+  }
   cam.watching = true;
   el.camWatch.classList.add("on");
   el.camWatch.textContent = "👁 Stop watching";
@@ -1126,8 +1308,10 @@ function stopWatch() {
   el.camLive.hidden = true;
 }
 
-el.camBtn.onclick = openCamera;
-el.camClose.onclick = closeCamera;
+el.camBtn.onclick = () => openLook("camera");
+el.screenBtn.onclick = () => openLook("screen");
+el.screenBtn.hidden = !navigator.mediaDevices?.getDisplayMedia; // phones cannot share a screen
+el.camClose.onclick = closeLook;
 el.camSnap.onclick = snapAndAsk;
 el.camWatch.onclick = () => (cam.watching ? stopWatch() : startWatch());
 el.camFlip.onclick = () => {
@@ -1135,16 +1319,19 @@ el.camFlip.onclick = () => {
   startStream();
 };
 el.camSheet.onclick = (e) => {
-  if (e.target === el.camSheet) closeCamera();
+  if (e.target === el.camSheet) closeLook();
 };
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !el.camSheet.hidden) closeCamera();
+  if (e.key === "Escape" && !el.camSheet.hidden) closeLook();
 });
 
-// Say up front whether the camera can work, instead of failing on the first snap.
+// Say up front whether looking can work, instead of failing on the first snap.
 fetch("/api/models")
   .then((r) => r.json())
   .then((m) => {
-    if (!m.vision) el.camBtn.title = `Camera mode needs a vision model — run: ollama pull ${m.visionModel}`;
+    if (m.vision) return;
+    const hint = `needs a vision model — run: ollama pull ${m.visionModel}`;
+    el.camBtn.title = `Camera mode ${hint}`;
+    el.screenBtn.title = `Screen mode ${hint}`;
   })
   .catch(() => {});

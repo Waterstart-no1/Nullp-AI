@@ -411,3 +411,10 @@ kbd {
   font-size: 12px; color: var(--ink-soft); font-style: italic;
   margin: 0 0 7px; padding-left: 10px; border-left: 2px solid var(--line);
 }
+
+.cam-view.screen { aspect-ratio: 16 / 10; }
+.cam-view.screen video { object-fit: contain; }
+
+/* ------------------------------------------------------- photos, location */
+
+.chip-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 5px; margin-left: -3px; }

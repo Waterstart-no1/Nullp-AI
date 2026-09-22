@@ -65,6 +65,35 @@ Anthropic key, Claude sees the frame directly. Frames stay on this machine
 unless a Claude key is set; nothing is recorded, only the frames you send are
 kept, inside that chat.
 
+## Screen mode
+
+The 🖥 button shares a screen or window with Nullp - same **Snap & ask** and
+**👁 Watch** as the camera. Snap asks about scams, phishing pages, dangerous
+commands and bad settings on screen. Watch keeps looking while you work in
+another window, and when it finds something it pops a system notification
+(allowed on the first Watch click) as well as speaking. "Stop sharing" in the
+browser bar closes it. Desktop browsers only - phones cannot share a screen.
+
+## Photos
+
+📎, drag-and-drop, or **paste a screenshot** straight into the message box.
+The picture is shrunk to a JPEG and goes to Nullp exactly like a camera frame -
+one picture per message; a new one replaces the old. With the box empty Nullp
+asks itself "what is in this picture, anything risky?".
+
+## Location
+
+📍 attaches where you are: the place name, coordinates and local time, so
+"is it safe to walk here now" has something to work with. The coordinates are
+sent once to OpenStreetMap (Nominatim) to get the place name - the only thing
+Nullp ever sends off the machine without a Claude key. If that fails, the
+coordinates still go along.
+
+## On a phone
+
+Watch warnings also vibrate, and every answer gets a **Share** button that
+hands it to any app.
+
 ## Reading files and links
 
 - **📎 or drag-and-drop** any text file (scripts, configs, contracts saved as
@@ -134,8 +163,9 @@ Streaming replies · multiple saved chats · search · rename (double-click) ·
 delete · regenerate · edit & resend · stop mid-answer · copy · export to
 Markdown · token usage · light/dark theme · keyboard shortcuts
 (`Enter` send, `Shift+Enter` newline, `Ctrl/Cmd+K` new chat, `Esc` stop) ·
-offline fallback · voice in and voice out · camera mode with watch · reads
-files and links · standing notes · model picker · severity badges ·
+offline fallback · voice in and voice out · camera mode with watch · screen
+mode with watch and notifications · photos and pasted screenshots · location ·
+share and vibrate on phones · reads files and links · standing notes · model picker · severity badges ·
 backup and restore.
 
 Chats are stored in your browser's `localStorage`. The API key stays on the

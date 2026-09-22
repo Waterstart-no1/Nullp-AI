@@ -70,10 +70,12 @@
       <div class="usage" id="usage"></div>
       <div class="attachments" id="attachments" hidden></div>
       <div class="input-row">
-        <button class="btn ghost attach" id="attachBtn" title="Attach a file for Nullp to read">📎</button>
+        <button class="btn ghost attach" id="attachBtn" title="Attach a file or photo for Nullp to read">📎</button>
         <input type="file" id="attachFile" multiple hidden />
         <button class="btn ghost attach" id="camBtn" title="Camera mode: let Nullp look">📷</button>
-        <textarea id="input" rows="1" placeholder="What are you about to do? Paste a link or drop a file." aria-label="Message Nullp"></textarea>
+        <button class="btn ghost attach" id="screenBtn" title="Screen mode: let Nullp look at your screen">🖥</button>
+        <button class="btn ghost attach" id="placeBtn" title="Tell Nullp where you are">📍</button>
+        <textarea id="input" rows="1" placeholder="What are you about to do? Paste a link, a photo, or drop a file." aria-label="Message Nullp"></textarea>
         <button class="btn primary send" id="send" title="Send (Enter)">Send</button>
         <button class="btn danger send" id="stop" hidden title="Stop generating">Stop</button>
       </div>
@@ -110,11 +112,11 @@
 <div class="sheet" id="camSheet" hidden>
   <div class="sheet-box cam-box" role="dialog" aria-label="Camera mode">
     <div class="sheet-head">
-      <b>📷 Camera mode</b>
-      <span class="sheet-sub">Nullp looks, then warns and informs. Nothing is recorded or kept except the frame you send.</span>
+      <b id="camTitle">📷 Camera mode</b>
+      <span class="sheet-sub" id="camSub">Nullp looks, then warns and informs. Nothing is recorded or kept except the frame you send.</span>
       <button class="x" id="camClose" title="Close">✕</button>
     </div>
-    <div class="cam-view">
+    <div class="cam-view" id="camView">
       <video id="camVideo" autoplay playsinline muted></video>
       <div class="cam-live" id="camLive" hidden>👁 watching</div>
     </div>
@@ -127,7 +129,7 @@
   </div>
 </div>
 
-<div class="drop" id="drop" hidden><div>Drop a file — Nullp will read it</div></div>
+<div class="drop" id="drop" hidden><div>Drop a file or photo — Nullp will read it</div></div>
 
 <script src="app.js"></script>
 </body>

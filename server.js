@@ -226,6 +226,10 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, await listModels());
   }
 
+  if (req.method === "GET" && url.pathname === "/api/place") {
+    return placeName(url, res);
+  }
+
   if (req.method === "POST" && url.pathname === "/api/fetch") {
     return fetchPage(req, res);
   }
@@ -295,7 +299,7 @@ async function handleChat(req, res) {
 
   const image = parseImage(body.image);
   if (body.image && !image) {
-    send(res, "error", { message: "That camera frame was not a usable image." });
+    send(res, "error", { message: "That picture was not a usable image (JPEG, PNG or WebP, under 1.5 MB)." });
     return res.end();
   }
 
@@ -316,7 +320,7 @@ async function handleChat(req, res) {
         send(res, "seen", { text: seen });
       }
       const cameraBlock = seen
-        ? `WHAT THE CAMERA SEES RIGHT NOW (described by a small vision model - it can be wrong or vague; base warnings only on what it actually describes, and say so if the view is unclear):\n${seen}`
+        ? `WHAT THE PICTURE SHOWS - a camera frame, a screenshot or a photo (described by a small vision model - it can be wrong or vague; base warnings only on what it actually describes, and say so if the view is unclear):\n${seen}`
         : "";
       return streamLocal(res, req, MODES[mode].system, [context, extra, cameraBlock].filter(Boolean).join("\n\n"), history, localModel);
     }
@@ -633,6 +637,32 @@ async function fetchPage(req, res) {
   }
 }
 
+// Coordinates mean nothing to a model; a place name does. OpenStreetMap's
+// Nominatim turns one into the other. This is the only call that sends the
+// location off the machine, and only when the person presses 📍.
+async function placeName(url, res) {
+  const lat = Number(url.searchParams.get("lat"));
+  const lon = Number(url.searchParams.get("lon"));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return json(res, 400, { error: "lat and lon must be numbers" });
+  }
+  try {
+    const upstream = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${lat}&lon=${lon}`,
+      {
+        // Nominatim's usage policy asks for an identifying User-Agent.
+        headers: { "User-Agent": "Nullp/1.0 (local assistant)", "Accept-Language": "en" },
+        signal: AbortSignal.timeout(6000),
+      },
+    );
+    const body = await upstream.json();
+    if (!upstream.ok || !body.display_name) throw new Error(body.error || `status ${upstream.status}`);
+    return json(res, 200, { name: String(body.display_name).slice(0, 300) });
+  } catch (err) {
+    return json(res, 502, { error: `no place name: ${err.message}` });
+  }
+}
+
 // Strip a page down to the words. Not a parser - just enough for the model.
 function toReadableText(raw, type) {
   let text = raw;
@@ -720,7 +750,7 @@ function attachmentBlock(list) {
     .slice(0, 5)
     .map((a, i) => {
       const label = String(a.name || `attachment ${i + 1}`).slice(0, 120);
-      const kind = a.kind === "url" ? "fetched page" : "file";
+      const kind = { url: "fetched page", location: "their current location" }[a.kind] || "file";
       return `--- ${kind}: ${label} ---\n${a.text.slice(0, 8000)}`;
     });
   if (!parts.length) return "";
