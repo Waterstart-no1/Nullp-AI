@@ -102,7 +102,8 @@ body {
 .chat-item:hover button { opacity: 0.6; }
 .chat-item button:hover { opacity: 1; color: var(--danger); }
 
-.sidebar-foot { display: flex; gap: 6px; }
+.sidebar-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sidebar-foot .btn { padding: 6px 8px; font-size: 12.5px; white-space: nowrap; }
 
 /* ------------------------------------------------------------------- shared */
 
@@ -313,4 +314,100 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .bars i, .corner-btn.listening { animation: none; }
+}
+
+/* ------------------------------------- attachments, notes, brain, severity */
+
+.attach { align-self: stretch; padding-inline: 11px; font-size: 15px; }
+
+.attachments {
+  max-width: 780px; margin: 0 auto 7px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.attachments[hidden] { display: none; }
+
+.chip-file {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 12px; color: var(--ink-soft); max-width: 100%;
+}
+.chip-file b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.chip-file.loading { opacity: 0.6; }
+.chip-file.bad { border-color: var(--danger); color: var(--danger); }
+.chip-file button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0 1px; }
+.chip-file button:hover { color: var(--danger); }
+
+.badge {
+  display: inline-block; margin-left: 8px;
+  padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700;
+  vertical-align: 1px;
+}
+.badge.clear { background: var(--do-bg); color: var(--do); }
+.badge.caution { background: var(--warn-bg); color: var(--warn); }
+.badge.high { background: var(--danger); color: #fff; }
+
+/* modal sheet */
+.sheet {
+  position: fixed; inset: 0; z-index: 30;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 20px;
+}
+.sheet[hidden] { display: none; }
+.sheet-box {
+  width: min(560px, 100%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+}
+.sheet-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 10px; }
+.sheet-head b { font-size: 15px; }
+.sheet-sub { grid-column: 1; font-size: 12px; color: var(--ink-soft); }
+.sheet-head .x { grid-row: 1 / span 2; align-self: start; border: 0; background: none; color: var(--ink-soft); cursor: pointer; font-size: 15px; }
+.sheet-head .x:hover { color: var(--danger); }
+.sheet-box textarea {
+  width: 100%; resize: vertical; min-height: 150px;
+  padding: 11px 12px; font: inherit; font-size: 13.5px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel-2); color: var(--ink);
+}
+.sheet-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.sheet-state { flex: 1; font-size: 12px; color: var(--ink-soft); }
+
+/* drag and drop overlay */
+.drop {
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.drop[hidden] { display: none; }
+.drop div {
+  border: 2px dashed var(--accent); border-radius: 16px;
+  padding: 26px 40px; background: var(--panel); color: var(--ink);
+  font-size: 15px; font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- camera */
+
+.cam-box { width: min(640px, 100%); }
+.cam-view {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  background: #000; aspect-ratio: 4 / 3; max-width: 100%;
+}
+.cam-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-live {
+  position: absolute; top: 10px; left: 10px;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: 12px; font-weight: 600;
+  animation: blink 1.4s steps(2) infinite;
+}
+.cam-live[hidden] { display: none; }
+#camWatch.on { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.shot { display: block; max-width: 220px; border-radius: 8px; border: 1px solid var(--line); margin-top: 6px; }
+.seen {
+  font-size: 12px; color: var(--ink-soft); font-style: italic;
+  margin: 0 0 7px; padding-left: 10px; border-left: 2px solid var(--line);
 }

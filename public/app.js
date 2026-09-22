@@ -17,6 +17,14 @@ const el = {
   send: $("send"), stop: $("stop"), regen: $("regen"),
   voice: $("voice"), playing: $("playing"), playingText: $("playingText"),
   playingStop: $("playingStop"),
+  engine: $("engine"), notesBtn: $("notesBtn"), notesSheet: $("notesSheet"),
+  notesText: $("notesText"), notesSave: $("notesSave"), notesClose: $("notesClose"),
+  notesState: $("notesState"), backupBtn: $("backupBtn"), restoreBtn: $("restoreBtn"),
+  restoreFile: $("restoreFile"), attachBtn: $("attachBtn"), attachFile: $("attachFile"),
+  attachments: $("attachments"), drop: $("drop"),
+  camBtn: $("camBtn"), camSheet: $("camSheet"), camVideo: $("camVideo"), camSnap: $("camSnap"),
+  camWatch: $("camWatch"), camFlip: $("camFlip"), camClose: $("camClose"), camState: $("camState"),
+  camLive: $("camLive"),
 };
 
 const KEY = "nullp.v1";
@@ -189,6 +197,7 @@ function turnNode(msg, index) {
   const who = document.createElement("div");
   who.className = "who";
   who.textContent = msg.role === "user" ? "You" : "Nullp";
+  if (msg.role === "assistant" && !msg.failed) who.append(severityBadge(msg.content));
   wrap.append(who);
 
   if (msg.role === "user") {
@@ -196,7 +205,27 @@ function turnNode(msg, index) {
     bubble.className = "bubble";
     bubble.textContent = msg.content;
     wrap.append(bubble);
+    if (msg.image) {
+      const img = document.createElement("img");
+      img.className = "shot";
+      img.src = msg.image;
+      img.alt = "Camera frame sent to Nullp";
+      wrap.append(img);
+    }
+    if (msg.attachments?.length) {
+      const row = document.createElement("div");
+      row.className = "attachments";
+      row.style.margin = "6px 0 0";
+      for (const a of msg.attachments) row.append(fileChip(a));
+      wrap.append(row);
+    }
   } else {
+    if (msg.seen) {
+      const seen = document.createElement("div");
+      seen.className = "seen";
+      seen.textContent = `Nullp saw: ${msg.seen}`;
+      wrap.append(seen);
+    }
     wrap.append(linesNode(msg.content));
   }
 
@@ -276,10 +305,19 @@ function linkButton(label, onclick) {
 
 async function submit() {
   const text = el.input.value.trim();
-  if (!text || inFlight) return;
+  if ((!text && !pending.length) || inFlight) return;
+  if (pending.some((a) => a.loading)) return; // still reading a file or link
+
+  await readLinksIn(text);
+  const attachments = pending.filter((a) => !a.error).map(({ name, kind, text: body }) => ({ name, kind, text: body }));
+  clearPending();
 
   const chat = active();
-  chat.messages.push({ role: "user", content: text });
+  chat.messages.push({
+    role: "user",
+    content: text || `(Read ${attachments.map((a) => a.name).join(", ")} and warn me about it.)`,
+    ...(attachments.length ? { attachments } : {}),
+  });
   if (chat.title === "New chat") {
     chat.title = text.length > 38 ? `${text.slice(0, 38)}…` : text;
   }
@@ -319,6 +357,7 @@ async function stream(chat) {
   scrollToEnd();
 
   let text = "";
+  let seen = "";
   inFlight = new AbortController();
 
   try {
@@ -329,13 +368,22 @@ async function stream(chat) {
         // Failed turns stay on screen but never go back to the model.
         messages: chat.messages.filter((m) => !m.failed),
         mode: el.mode.value,
+        attachments: [...chat.messages].reverse().find((m) => m.role === "user")?.attachments ?? [],
+        image: [...chat.messages].reverse().find((m) => m.role === "user")?.image,
+        ...brainChoice(),
       }),
       signal: inFlight.signal,
     });
     if (!res.ok || !res.body) throw new Error(`server responded ${res.status}`);
 
     for await (const evt of sse(res.body)) {
-      if (evt.event === "delta") {
+      if (evt.event === "seen") {
+        seen = evt.data.text;
+        const note = document.createElement("div");
+        note.className = "seen";
+        note.textContent = `Nullp saw: ${seen}`;
+        live.insertBefore(note, live.querySelector(".lines"));
+      } else if (evt.event === "delta") {
         text += evt.data.text;
         body.replaceWith(Object.assign(linesNode(text), { className: "lines cursor" }));
         body = live.querySelector(".lines");
@@ -356,7 +404,7 @@ async function stream(chat) {
     inFlight = null;
     live.remove();
     if (text.trim()) {
-      const turn = { role: "assistant", content: text.trim() };
+      const turn = { role: "assistant", content: text.trim(), ...(seen ? { seen } : {}) };
       if (/^\[error\]/m.test(turn.content)) turn.failed = true;
       chat.messages.push(turn);
       chat.updated = Date.now();
@@ -632,3 +680,471 @@ const voice = {
 };
 
 voice.init();
+
+// ------------------------------------------------------------------ severity
+// How bad is it, at a glance: counted from Nullp's own [warn] lines.
+
+function severityBadge(text) {
+  const warnings = (text.match(/^\s*\[warn\]/gim) || []).length;
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  if (!warnings) {
+    badge.classList.add("clear");
+    badge.textContent = "all clear";
+  } else if (warnings <= 2) {
+    badge.classList.add("caution");
+    badge.textContent = `${warnings} warning${warnings > 1 ? "s" : ""}`;
+  } else {
+    badge.classList.add("high");
+    badge.textContent = `${warnings} warnings`;
+  }
+  return badge;
+}
+
+// --------------------------------------------------------------- attachments
+// Files you drop or pick, and links in your message, become text Nullp reads.
+// The server labels all of it as data, never as instructions.
+
+const pending = [];
+const MAX_FILE_BYTES = 300_000;
+const URL_RE = /\bhttps?:\/\/[^\s<>"'）)]+/gi;
+
+function fileChip(a, onRemove) {
+  const chip = document.createElement("span");
+  chip.className = `chip-file${a.loading ? " loading" : ""}${a.error ? " bad" : ""}`;
+  chip.title = a.error || (a.kind === "url" ? a.url : `${a.text.length.toLocaleString()} characters`);
+  const icon = a.kind === "url" ? "🔗" : "📄";
+  const label = document.createElement("b");
+  label.textContent = a.loading ? `${a.name} — reading…` : a.error ? `${a.name} — ${a.error}` : a.name;
+  chip.append(icon, label);
+  if (onRemove) {
+    const x = document.createElement("button");
+    x.textContent = "×";
+    x.title = "Remove";
+    x.onclick = onRemove;
+    chip.append(x);
+  }
+  return chip;
+}
+
+function renderPending() {
+  el.attachments.textContent = "";
+  el.attachments.hidden = !pending.length;
+  pending.forEach((a, i) =>
+    el.attachments.append(
+      fileChip(a, () => {
+        pending.splice(i, 1);
+        renderPending();
+      }),
+    ),
+  );
+}
+
+function clearPending() {
+  pending.length = 0;
+  renderPending();
+}
+
+async function addFiles(files) {
+  for (const file of files) {
+    const entry = { name: file.name, kind: "file", text: "", loading: true };
+    pending.push(entry);
+    renderPending();
+
+    if (file.size > MAX_FILE_BYTES) {
+      Object.assign(entry, { loading: false, error: "too big (max 300 KB)" });
+    } else {
+      try {
+        const text = await file.text();
+        // Binary files decode into replacement characters - not worth sending.
+        const junk = (text.match(/�/g) || []).length;
+        if (!text.trim() || junk > text.length * 0.02) {
+          Object.assign(entry, { loading: false, error: "not a text file" });
+        } else {
+          Object.assign(entry, { loading: false, text: text.slice(0, 8000) });
+        }
+      } catch {
+        Object.assign(entry, { loading: false, error: "could not read" });
+      }
+    }
+    renderPending();
+  }
+}
+
+// Every link in the message is fetched by the local server and attached.
+async function readLinksIn(text) {
+  const urls = [...new Set(text.match(URL_RE) || [])].slice(0, 2);
+  const jobs = urls
+    .filter((url) => !pending.some((a) => a.url === url))
+    .map(async (url) => {
+      const entry = { name: new URL(url).hostname, kind: "url", url, text: "", loading: true };
+      pending.push(entry);
+      renderPending();
+      try {
+        const res = await fetch("/api/fetch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const page = await res.json();
+        if (!res.ok) throw new Error(page.error || `failed (${res.status})`);
+        Object.assign(entry, { loading: false, name: page.title || entry.name, text: `${page.url}\n\n${page.text}` });
+      } catch (err) {
+        Object.assign(entry, { loading: false, error: err.message });
+      }
+      renderPending();
+    });
+  await Promise.all(jobs);
+}
+
+el.attachBtn.onclick = () => el.attachFile.click();
+el.attachFile.onchange = () => {
+  addFiles([...el.attachFile.files]);
+  el.attachFile.value = "";
+};
+
+// A big paste becomes an attachment instead of flooding the input box.
+el.input.addEventListener("paste", (e) => {
+  const text = e.clipboardData?.getData("text") ?? "";
+  if (text.length < 2500) return;
+  e.preventDefault();
+  pending.push({ name: `pasted text (${text.length.toLocaleString()} chars)`, kind: "file", text: text.slice(0, 8000) });
+  renderPending();
+});
+
+let dragDepth = 0;
+window.addEventListener("dragenter", (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
+  dragDepth += 1;
+  el.drop.hidden = false;
+});
+window.addEventListener("dragleave", () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) el.drop.hidden = true;
+});
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  el.drop.hidden = true;
+  if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
+});
+
+// --------------------------------------------------------------------- brain
+// Pick which model answers: Claude when there is a key, or any local model.
+
+function brainChoice() {
+  const [engine, ...rest] = (el.engine.value || "").split(":");
+  const model = rest.join(":");
+  return engine ? { engine, model } : {};
+}
+
+async function loadBrains() {
+  try {
+    const m = await (await fetch("/api/models")).json();
+    el.engine.textContent = "";
+    if (m.claude) el.engine.append(new Option(`Claude · ${m.claude}`, `claude:${m.claude}`));
+    for (const local of m.local) {
+      const gb = local.size ? ` · ${(local.size / 1e9).toFixed(1)} GB` : "";
+      el.engine.append(new Option(`${local.name} · local${gb}`, `local:${local.name}`));
+    }
+    if (!el.engine.options.length) el.engine.append(new Option("none — offline", ""));
+
+    const saved = state.brain;
+    const fallback = `${m.default.engine}:${m.default.model}`;
+    el.engine.value = [...el.engine.options].some((o) => o.value === saved) ? saved : fallback;
+    if (!el.engine.value && el.engine.options.length) el.engine.selectedIndex = 0;
+  } catch {
+    el.engine.textContent = "";
+    el.engine.append(new Option("server unreachable", ""));
+  }
+}
+
+el.engine.onchange = () => {
+  state.brain = el.engine.value;
+  save();
+};
+
+loadBrains();
+
+// --------------------------------------------------------------------- notes
+// Standing facts, stored on the server so the games' widget sees them too.
+
+async function openNotes() {
+  el.notesSheet.hidden = false;
+  el.notesState.textContent = "loading…";
+  try {
+    const notes = await (await fetch("/api/notes")).json();
+    el.notesText.value = notes.text || "";
+    el.notesState.textContent = notes.updated
+      ? `saved ${new Date(notes.updated).toLocaleString()}`
+      : "nothing saved yet";
+  } catch {
+    el.notesState.textContent = "could not reach the server";
+  }
+  el.notesText.focus();
+}
+
+async function saveNotesNow() {
+  el.notesState.textContent = "saving…";
+  try {
+    const res = await fetch("/api/notes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: el.notesText.value }),
+    });
+    const notes = await res.json();
+    if (!res.ok) throw new Error(notes.error);
+    el.notesState.textContent = `saved ${new Date(notes.updated).toLocaleTimeString()}`;
+  } catch (err) {
+    el.notesState.textContent = `not saved: ${err.message}`;
+  }
+}
+
+el.notesBtn.onclick = openNotes;
+el.notesSave.onclick = saveNotesNow;
+el.notesClose.onclick = () => (el.notesSheet.hidden = true);
+el.notesSheet.onclick = (e) => {
+  if (e.target === el.notesSheet) el.notesSheet.hidden = true;
+};
+el.notesText.addEventListener("keydown", (e) => {
+  e.stopPropagation(); // "v" and Ctrl+K belong to the text here, not the app
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    saveNotesNow();
+  }
+  if (e.key === "Escape") el.notesSheet.hidden = true;
+});
+
+// ------------------------------------------------------------ backup/restore
+
+function backup() {
+  const payload = { app: "nullp", version: 1, exported: new Date().toISOString(), chats: state.chats };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `nullp-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function restore(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    el.usage.textContent = "restore failed: that file is not JSON";
+    return;
+  }
+  const incoming = Array.isArray(data?.chats) ? data.chats : [];
+  const valid = incoming.filter(
+    (c) => c && typeof c.id === "string" && Array.isArray(c.messages) && typeof c.title === "string",
+  );
+  const known = new Set(state.chats.map((c) => c.id));
+  const added = valid.filter((c) => !known.has(c.id));
+  state.chats.push(...added);
+  // Drop the untouched blank chat if we just brought real ones in.
+  if (added.length) state.chats = state.chats.filter((c) => c.messages.length || c.id === state.activeId);
+  save();
+  renderChats();
+  el.usage.textContent = `restored ${added.length} chat${added.length === 1 ? "" : "s"}` +
+    (valid.length - added.length ? `, skipped ${valid.length - added.length} already here` : "");
+}
+
+el.backupBtn.onclick = backup;
+el.restoreBtn.onclick = () => el.restoreFile.click();
+el.restoreFile.onchange = () => {
+  if (el.restoreFile.files[0]) restore(el.restoreFile.files[0]);
+  el.restoreFile.value = "";
+};
+
+// -------------------------------------------------------------------- camera
+// Nullp looks through the camera. One-off: snap a frame and ask about it.
+// Watch mode: look every few seconds, stay silent unless something is wrong.
+
+const cam = { stream: null, facing: "user", watching: false, timer: null, busy: false, lastSpoke: 0 };
+const WATCH_EVERY_MS = 12000;
+const WATCH_PROMPT =
+  "Look at the camera view. If something is actually risky, warn me in one or two lines. " +
+  "If nothing is risky, reply exactly: [info] All clear.";
+
+async function openCamera() {
+  el.camSheet.hidden = false;
+  await startStream();
+}
+
+async function startStream() {
+  stopStream();
+  el.camState.textContent = "starting camera…";
+  if (!navigator.mediaDevices?.getUserMedia) {
+    el.camState.textContent = "this browser has no camera access";
+    return;
+  }
+  try {
+    cam.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: cam.facing, width: { ideal: 1280 } },
+      audio: false,
+    });
+    el.camVideo.srcObject = cam.stream;
+    el.camState.textContent = "ready — ask a question in the box, or just snap";
+  } catch (err) {
+    el.camState.textContent =
+      err.name === "NotAllowedError"
+        ? "camera blocked — allow it in the browser's site settings"
+        : err.name === "NotFoundError"
+          ? "no camera found"
+          : `camera error: ${err.message}`;
+  }
+}
+
+function stopStream() {
+  cam.stream?.getTracks().forEach((t) => t.stop());
+  cam.stream = null;
+  el.camVideo.srcObject = null;
+}
+
+function closeCamera() {
+  stopWatch();
+  stopStream();
+  el.camSheet.hidden = true;
+}
+
+// One size for everything: small enough for localStorage, big enough to read.
+function grabFrame() {
+  const v = el.camVideo;
+  if (!v.videoWidth) return null;
+  const scale = Math.min(1, 512 / v.videoWidth);
+  const c = document.createElement("canvas");
+  c.width = Math.round(v.videoWidth * scale);
+  c.height = Math.round(v.videoHeight * scale);
+  c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.65);
+}
+
+async function snapAndAsk() {
+  if (inFlight) return;
+  const frame = grabFrame();
+  if (!frame) {
+    el.camState.textContent = "no picture yet — is the camera on?";
+    return;
+  }
+  const question = el.input.value.trim() || "What do you see? Warn me about anything risky.";
+  el.input.value = "";
+  autosize();
+  closeCamera();
+
+  const chat = active();
+  chat.messages.push({ role: "user", content: question, image: frame });
+  if (chat.title === "New chat") chat.title = `📷 ${question.slice(0, 34)}`;
+  chat.updated = Date.now();
+  save();
+  renderChats();
+  renderTranscript();
+  await stream(chat);
+}
+
+// A request that does not touch the chat unless it finds something.
+async function quietAsk(frame) {
+  let text = "";
+  let seen = "";
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [{ role: "user", content: WATCH_PROMPT }],
+      mode: "brief",
+      image: frame,
+      ...brainChoice(),
+    }),
+  });
+  if (!res.ok || !res.body) throw new Error(`server responded ${res.status}`);
+  for await (const evt of sse(res.body)) {
+    if (evt.event === "delta") text += evt.data.text;
+    else if (evt.event === "seen") seen = evt.data.text;
+    else if (evt.event === "error") throw new Error(evt.data.message);
+  }
+  return { text: text.trim(), seen };
+}
+
+async function watchTick() {
+  if (!cam.watching) return;
+  if (!inFlight && !cam.busy && !document.hidden) {
+    const frame = grabFrame();
+    if (frame) {
+      cam.busy = true;
+      el.camState.textContent = "looking…";
+      try {
+        const { text, seen } = await quietAsk(frame);
+        const stamp = new Date().toLocaleTimeString();
+        const warns = (text.match(/^\s*\[warn\]/gim) || []).length;
+        if (warns && cam.watching) {
+          // The small model sometimes tacks the "all clear" sentinel onto a warning.
+          const cleaned = text
+            .split("\n")
+            .filter((l) => !/^\s*\[info\]\s*all clear\.?\s*$/i.test(l))
+            .join("\n");
+          const chat = active();
+          chat.messages.push({ role: "user", content: "👁 Watch mode", image: frame });
+          chat.messages.push({ role: "assistant", content: cleaned, ...(seen ? { seen } : {}) });
+          chat.updated = Date.now();
+          save();
+          renderChats();
+          renderTranscript();
+          el.camState.textContent = `⚠ ${warns} warning${warns > 1 ? "s" : ""} at ${stamp} — see the chat`;
+          // Speak up, but not every tick about the same thing.
+          if (voice.canTalk && Date.now() - cam.lastSpoke > 30000) {
+            cam.lastSpoke = Date.now();
+            voice.say(cleaned);
+          }
+        } else if (cam.watching) {
+          el.camState.textContent = `all clear · ${stamp}`;
+        }
+      } catch (err) {
+        el.camState.textContent = `watch paused: ${err.message}`;
+      } finally {
+        cam.busy = false;
+      }
+    }
+  }
+  if (cam.watching) cam.timer = setTimeout(watchTick, WATCH_EVERY_MS);
+}
+
+function startWatch() {
+  if (!cam.stream) return;
+  cam.watching = true;
+  el.camWatch.classList.add("on");
+  el.camWatch.textContent = "👁 Stop watching";
+  el.camLive.hidden = false;
+  watchTick();
+}
+
+function stopWatch() {
+  cam.watching = false;
+  clearTimeout(cam.timer);
+  el.camWatch.classList.remove("on");
+  el.camWatch.textContent = "👁 Watch";
+  el.camLive.hidden = true;
+}
+
+el.camBtn.onclick = openCamera;
+el.camClose.onclick = closeCamera;
+el.camSnap.onclick = snapAndAsk;
+el.camWatch.onclick = () => (cam.watching ? stopWatch() : startWatch());
+el.camFlip.onclick = () => {
+  cam.facing = cam.facing === "user" ? "environment" : "user";
+  startStream();
+};
+el.camSheet.onclick = (e) => {
+  if (e.target === el.camSheet) closeCamera();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !el.camSheet.hidden) closeCamera();
+});
+
+// Say up front whether the camera can work, instead of failing on the first snap.
+fetch("/api/models")
+  .then((r) => r.json())
+  .then((m) => {
+    if (!m.vision) el.camBtn.title = `Camera mode needs a vision model — run: ollama pull ${m.visionModel}`;
+  })
+  .catch(() => {});
