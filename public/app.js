@@ -52,10 +52,29 @@ function load() {
 }
 
 function save() {
+  if (trySave()) return;
+  // Full quota: camera frames are nearly all of it (watch mode adds one per
+  // warning). Drop them, oldest chats first, until the text fits again -
+  // otherwise every save fails silently and new chats vanish on reload.
+  const framed = [...state.chats]
+    .sort((a, b) => a.updated - b.updated)
+    .flatMap((c) => c.messages.filter((m) => m.image));
+  while (framed.length) {
+    for (const m of framed.splice(0, Math.ceil(framed.length / 2))) delete m.image;
+    if (trySave()) {
+      el.usage.textContent = "storage was full - older camera frames were removed";
+      return;
+    }
+  }
+  el.usage.textContent = "can't save - chats will be lost on reload. ⇩ Backup, then delete old chats.";
+}
+
+function trySave() {
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
+    return true;
   } catch {
-    /* private mode or full quota - the app still works for this session */
+    return false; // private mode or full quota
   }
 }
 
@@ -84,20 +103,30 @@ CHIPS.forEach((text) => {
   el.chips.append(b);
 });
 
-fetch("/api/health")
-  .then((r) => r.json())
-  .then((h) => {
-    el.status.className = `status ${h.connected ? "live" : "offline"}`;
-    el.status.textContent = !h.connected
-      ? "offline - no model"
-      : h.engine === "local"
-        ? `${h.model} · local`
-        : h.model;
-  })
-  .catch(() => {
-    el.status.className = "status offline";
-    el.status.textContent = "server unreachable";
-  });
+// Checked again while offline, so starting Ollama (or the server) after the
+// page loaded shows up without a reload.
+function checkHealth() {
+  return fetch("/api/health")
+    .then((r) => r.json())
+    .then((h) => {
+      const wasOffline = el.status.classList.contains("offline");
+      el.status.className = `status ${h.connected ? "live" : "offline"}`;
+      el.status.textContent = !h.connected
+        ? "offline - no model"
+        : h.engine === "local"
+          ? `${h.model} · local`
+          : h.model;
+      if (h.connected && wasOffline) loadBrains();
+    })
+    .catch(() => {
+      el.status.className = "status offline";
+      el.status.textContent = "server unreachable";
+    });
+}
+checkHealth();
+setInterval(() => {
+  if (!el.status.classList.contains("live") && !document.hidden) checkHealth();
+}, 15000);
 
 renderChats();
 renderTranscript();
@@ -239,6 +268,11 @@ function turnNode(msg, index) {
       if (inFlight) return;
       const chat = active();
       el.input.value = msg.content;
+      // Bring back what was attached, or the resend silently loses it.
+      if (msg.attachments?.length) {
+        pending.push(...msg.attachments);
+        renderPending();
+      }
       chat.messages = chat.messages.slice(0, index);
       save();
       renderTranscript();

@@ -174,6 +174,11 @@ function serveGame(pathname, res) {
 
   const relative = safeDecode(rest.join("/"));
   if (relative === null) return json(res, 400, { error: "bad path" });
+  // Games keep a copy of the widget for file:// use. Served from here, they
+  // always get the current one, so an old copy never hides a fix.
+  if (path.basename(relative) === "nullp-widget.js") {
+    return serveFile(path.join(HERE, "widget", "nullp-widget.js"), res);
+  }
   const file = path.join(game.root, !relative || relative.endsWith("/") ? `${relative}index.html` : relative);
   if (!isInside(file, game.root)) return json(res, 403, { error: "forbidden" });
   serveFile(file, res);
@@ -453,11 +458,13 @@ let localSeenAt = 0;
 let localSeen = false;
 
 // Cached probe - asking Ollama on every request would add latency for nothing.
+// Only a "yes" is cached: Ollama answers slowly while it loads a model, and a
+// cached "no" would hand out the canned offline reply for the next 15 seconds.
 async function localAvailable(wanted) {
-  if (!wanted && Date.now() - localSeenAt < 15000) return localSeen;
+  if (!wanted && localSeen && Date.now() - localSeenAt < 15000) return true;
   try {
     const res = await fetch(`${OLLAMA_URL}/api/tags`, {
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(5000),
     });
     const names = (await res.json())?.models?.map((m) => m.name) ?? [];
     const ok = names.some((n) => sameModel(n, wanted || LOCAL_MODEL));

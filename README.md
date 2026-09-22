@@ -192,5 +192,7 @@ listens on `127.0.0.1` only; set `HOST=0.0.0.0` to expose it deliberately.
 The server also hosts the games themselves at `/games`, so the widget runs
 same-origin - no CORS, no `file://` restrictions, one thing to start. A game
 folder is picked up automatically if it has an `index.html` (directly, or in
-`public/` or `src/`). Opened any other way, the widget probes its own origin
-first and falls back to `http://localhost:4173`.
+`public/` or `src/`). Opened from `/games`, a game always gets the current
+`widget/nullp-widget.js`, whatever copy sits in its folder - the copy only
+matters when the game is opened as a file. Opened any other way, the widget
+probes its own origin first and falls back to `http://localhost:4173`.

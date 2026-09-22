@@ -466,8 +466,12 @@
       pill("listen", heard ? `“${heard.slice(0, 38)}”` : "Listening…");
     };
     rec.onerror = (e) => {
-      pill("listen", e.error === "not-allowed" ? "Mic blocked" : `Mic: ${e.error}`);
+      if (e.error === "aborted") return; // the person stopped it
+      pill("listen", e.error === "not-allowed" ? "Mic blocked - type instead" : `Mic: ${e.error} - type instead`);
       setTimeout(hidePill, 2000);
+      // Without this, a blocked or broken mic leaves no way to ask anything.
+      showPanel(true);
+      $("q").focus();
     };
     rec.onend = () => {
       listening = false;
