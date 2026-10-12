@@ -24,10 +24,15 @@
 
     <nav class="chats" id="chatList" aria-label="Saved chats"></nav>
 
+    <button class="btn ghost block" id="notesBtn" title="Facts Nullp applies to every answer">📌 What Nullp remembers</button>
+
     <div class="sidebar-foot">
       <button class="btn ghost" id="themeToggle" title="Toggle theme">◐ Theme</button>
+      <button class="btn ghost" id="backupBtn" title="Save every chat to a file">⇩ Backup</button>
+      <button class="btn ghost" id="restoreBtn" title="Load chats from a backup file">⇧ Restore</button>
       <button class="btn ghost" id="wipe" title="Delete every chat">Wipe all</button>
     </div>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden />
   </aside>
 
   <main class="main">
@@ -44,6 +49,10 @@
           <option value="explain">Explain</option>
         </select>
       </label>
+      <label class="mode">
+        Brain
+        <select id="engine" aria-label="Which model answers"></select>
+      </label>
       <button class="btn ghost" id="exportBtn" title="Download this chat as Markdown">↓ Export</button>
       <button class="corner-btn" id="voice" title="Talk to Nullp (V)" aria-label="Talk to Nullp">🎙</button>
     </header>
@@ -59,8 +68,12 @@
 
     <footer class="composer">
       <div class="usage" id="usage"></div>
+      <div class="attachments" id="attachments" hidden></div>
       <div class="input-row">
-        <textarea id="input" rows="1" placeholder="What are you about to do?" aria-label="Message Nullp"></textarea>
+        <button class="btn ghost attach" id="attachBtn" title="Attach a file for Nullp to read">📎</button>
+        <input type="file" id="attachFile" multiple hidden />
+        <button class="btn ghost attach" id="camBtn" title="Camera mode: let Nullp look">📷</button>
+        <textarea id="input" rows="1" placeholder="What are you about to do? Paste a link or drop a file." aria-label="Message Nullp"></textarea>
         <button class="btn primary send" id="send" title="Send (Enter)">Send</button>
         <button class="btn danger send" id="stop" hidden title="Stop generating">Stop</button>
       </div>
@@ -79,6 +92,43 @@
     <button class="playing-stop" id="playingStop" title="Stop">✕</button>
   </div>
 </div>
+<div class="sheet" id="notesSheet" hidden>
+  <div class="sheet-box" role="dialog" aria-label="What Nullp remembers">
+    <div class="sheet-head">
+      <b>📌 What Nullp remembers</b>
+      <span class="sheet-sub">Applied to every answer, in every chat, and in your games.</span>
+      <button class="x" id="notesClose" title="Close">✕</button>
+    </div>
+    <textarea id="notesText" rows="9" placeholder="Standing facts. For example:&#10;— I work on an 8GB M1, memory is tight.&#10;— My games are for my 10-year-old.&#10;— I use zsh and Homebrew."></textarea>
+    <div class="sheet-foot">
+      <span class="sheet-state" id="notesState"></span>
+      <button class="btn primary" id="notesSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="camSheet" hidden>
+  <div class="sheet-box cam-box" role="dialog" aria-label="Camera mode">
+    <div class="sheet-head">
+      <b>📷 Camera mode</b>
+      <span class="sheet-sub">Nullp looks, then warns and informs. Nothing is recorded or kept except the frame you send.</span>
+      <button class="x" id="camClose" title="Close">✕</button>
+    </div>
+    <div class="cam-view">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <div class="cam-live" id="camLive" hidden>👁 watching</div>
+    </div>
+    <div class="sheet-foot">
+      <span class="sheet-state" id="camState">starting camera…</span>
+      <button class="btn" id="camFlip" title="Switch camera">⟲</button>
+      <button class="btn" id="camWatch" title="Look every few seconds, speak up only when something is wrong">👁 Watch</button>
+      <button class="btn primary" id="camSnap">Snap &amp; ask</button>
+    </div>
+  </div>
+</div>
+
+<div class="drop" id="drop" hidden><div>Drop a file — Nullp will read it</div></div>
+
 <script src="app.js"></script>
 </body>
 </html>

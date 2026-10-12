@@ -47,6 +47,45 @@ character telling you how to connect it to a model.
 - **Brief** — one warning, one fact, one action. Nothing else.
 - **Explain** — teaching mode, heavy on `[info]`.
 
+## Camera mode
+
+The 📷 button next to the message box opens the camera.
+
+- **Snap & ask** — Nullp looks at one frame and answers whatever you typed
+  (or, with the box empty, "what do you see, warn me about anything risky").
+  The frame shows in the chat, with a line saying what Nullp saw.
+- **👁 Watch** — Nullp looks every 12 seconds and stays silent unless
+  something is wrong; then it drops the warning into the chat and says it out
+  loud (at most every 30 seconds). A red "watching" badge shows while it runs.
+- **⟲** switches between front and back cameras.
+
+Locally, a small vision model (`moondream`, 1.7 GB) describes the frame and the
+text model judges it - moondream on its own gets danger backwards. With an
+Anthropic key, Claude sees the frame directly. Frames stay on this machine
+unless a Claude key is set; nothing is recorded, only the frames you send are
+kept, inside that chat.
+
+## Reading files and links
+
+- **📎 or drag-and-drop** any text file (scripts, configs, contracts saved as
+  text, logs - up to 300 KB). Binary files are refused, not guessed at.
+- **Paste a link** in your message and Nullp fetches the page first - check an
+  install script before you `curl | bash` it.
+- A huge paste becomes an attachment instead of flooding the box.
+
+Everything attached is handed to the model as *data*, explicitly not as
+instructions, so a page that says "ignore your rules" gets flagged, not obeyed.
+
+## Other controls
+
+- **📌 What Nullp remembers** — standing facts applied to every answer, in every
+  chat and in the games (`notes.json`, git-ignored). `Cmd/Ctrl+S` saves.
+- **Brain** — pick the model that answers: any installed local model, or
+  Claude when a key is set.
+- **Severity badge** on every answer: *all clear*, *N warnings*, or red for 3+.
+- **⇩ Backup / ⇧ Restore** — every chat to a JSON file and back; restoring
+  merges and skips chats you already have.
+
 ## Talking to it
 
 The small 🎙 button in the **top-right corner** opens the mic. Speak, and what
@@ -95,7 +134,9 @@ Streaming replies · multiple saved chats · search · rename (double-click) ·
 delete · regenerate · edit & resend · stop mid-answer · copy · export to
 Markdown · token usage · light/dark theme · keyboard shortcuts
 (`Enter` send, `Shift+Enter` newline, `Ctrl/Cmd+K` new chat, `Esc` stop) ·
-offline fallback · voice in and voice out.
+offline fallback · voice in and voice out · camera mode with watch · reads
+files and links · standing notes · model picker · severity badges ·
+backup and restore.
 
 Chats are stored in your browser's `localStorage`. The API key stays on the
 server and is never sent to the page.
