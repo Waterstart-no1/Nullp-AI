@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { handleArcade } from "./arcade-accounts.js";
+import { gameKnowledge, codeListAnswer } from "./game-knowledge.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, "public");
@@ -279,9 +280,11 @@ async function handleChat(req, res) {
   // attached this turn (a file, or a page Nullp fetched for them).
   const notes = readNotes().text?.trim();
   const attached = attachmentBlock(body.attachments);
+  const history0 = sanitizeHistory(body.messages);
   const extra = [
     notes ? `STANDING NOTES from the person (always apply):\n${notes.slice(0, 1500)}` : "",
     attached,
+    gameKnowledge(history0, context, GAMES_DIR), // real facts when the question is about Daniel's games
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -296,6 +299,14 @@ async function handleChat(req, res) {
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
+
+  // "List all the codes" for one of Daniel's games: answered exactly from the game files.
+  const codes = !body.image && codeListAnswer(history, context, GAMES_DIR);
+  if (codes) {
+    send(res, "delta", { text: codes });
+    send(res, "done", { usage: null, engine: "facts", model: "game files" });
+    return res.end();
+  }
 
   const image = parseImage(body.image);
   if (body.image && !image) {
@@ -460,7 +471,9 @@ async function streamLocal(res, req, system, context, history, modelOverride) {
       body: JSON.stringify({
         model,
         stream: true,
-        options: { temperature: 0.2, num_predict: 400 }, // low: a warning tool should not be creative
+        // low temperature: a warning tool should not be creative. Game facts need room to read and
+        // to answer in (a full code list is long).
+        options: { temperature: 0.2, num_ctx: 8192, num_predict: /FACTS ABOUT DANIEL'S GAMES/.test(system + " " + context) ? 1600 : 400 },
         messages: [
           { role: "system", content: system + (context ? `\n\nCONTEXT: ${context}` : "") + LOCAL_NUDGE },
           ...history,
