@@ -57,9 +57,38 @@ async function body(req, readBody) {
   }
 }
 
+// Is a Discord invite still good? Asks Discord's public invite API, at most every 6 hours per code.
+const inviteCache = new Map(); // code -> { at, data }
+async function discordInvite(code) {
+  const hit = inviteCache.get(code);
+  if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.data;
+  let data;
+  try {
+    const r = await fetch(`https://discord.com/api/v10/invites/${encodeURIComponent(code)}?with_expiration=true`,
+      { signal: AbortSignal.timeout(8000) });
+    if (r.status === 404) data = { valid: false, expiresAt: null, server: null };
+    else if (!r.ok) return { valid: null, error: `Discord said ${r.status}` }; // unknown: don't cache
+    else {
+      const d = await r.json();
+      const expiresAt = d.expires_at || null;
+      data = { valid: !expiresAt || Date.parse(expiresAt) > Date.now(), expiresAt, server: d.guild?.name || null };
+    }
+  } catch {
+    return { valid: null, error: "Couldn't reach Discord" }; // offline: say "unknown", don't cache
+  }
+  inviteCache.set(code, { at: Date.now(), data });
+  return data;
+}
+
 /** Handles /api/arcade/*. Returns the response it sent. */
 export async function handleArcade(req, res, url, { json, readBody }) {
   const route = url.pathname.slice("/api/arcade/".length);
+
+  if (req.method === "GET" && route === "discord") {
+    const code = String(url.searchParams.get("invite") || "").replace(/^.*\//, "");
+    if (!/^[A-Za-z0-9-]{2,32}$/.test(code)) return json(res, 400, { error: "Bad invite." });
+    return json(res, 200, await discordInvite(code));
+  }
 
   if (req.method === "POST" && route === "signup") {
     const b = await body(req, readBody);
