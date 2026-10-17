@@ -42,7 +42,7 @@ function arcadeCodes(root) {
 }
 
 const ARCADE_FACTS = `DANIEL'S ARCADE (localhost:4173/games/arcade/) — hub for Daniel's games: Monster Attack!, REBUILD, Buckshot Roulette, Track Run, Learn English.
-- Play coins: 1 per 10 minutes of play inside the arcade (max 24 a day; pauses after 5 minutes idle). Arcade codes give coins too.
+- Play coins: 1 per 15 minutes of play inside the arcade (max 24 a day; pauses after 5 minutes idle). Arcade codes give coins too.
 - 🛒 Shop: themes, avatars, titles, gun/ability/background skins (work in Monster Attack!, Buckshot, REBUILD), ⚡ abilities (levels 1–5, max 3 switched on per game in the ⚡ bar on the left), and trading coins for each game's money (max 20 coins a day per game).
 - Quests (open from the invisible bottom-left corner of Shop → 🎁 Codes): Hard Quest → Medium Quests (unlocked by an invisible secret near spawn in Monster Attack!'s Astral Temple) → Easy Quest → 🛠️ Admin Panel.
 - Easy Quest = unlock 3 titles: 🏆 Champion (win Buckshot 10 times in a row, then wear the Shadow gun skin), ⚡ Fast Comebacker (win a REBUILD battle after your base hit 1 HP), ⚔️ Revenge (die to the ☠️ Reaper boss in Monster Attack!, then beat it in your very next match).
