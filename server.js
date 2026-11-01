@@ -189,6 +189,7 @@ const server = http.createServer(async (req, res) => {
   // expose it to a network you do not control.
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Arcade-Token");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     return res.end();

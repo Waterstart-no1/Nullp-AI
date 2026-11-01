@@ -80,9 +80,49 @@ async function discordInvite(code) {
   return data;
 }
 
+// 🐞 Bug reports. The arcade's "Send report" (and crashes it catches inside a game) arrive here, so
+// they reach the Admin Panel from ANY browser or address on this computer — they used to stay in the
+// browser they were typed in. Kept in ~/.daniels-arcade/bugs.json (newest 300).
+const BUGS_FILE = path.join(DIR, "bugs.json");
+const MAX_BUGS = 300;
+function loadBugs() {
+  try { const b = JSON.parse(fs.readFileSync(BUGS_FILE, "utf8")); return Array.isArray(b) ? b : []; } catch { return []; }
+}
+function saveBugs(list) {
+  fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
+  const tmp = BUGS_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(list.slice(-MAX_BUGS)), { mode: 0o600 });
+  fs.renameSync(tmp, BUGS_FILE);
+}
+
 /** Handles /api/arcade/*. Returns the response it sent. */
 export async function handleArcade(req, res, url, { json, readBody }) {
   const route = url.pathname.slice("/api/arcade/".length);
+
+  if (route === "bugs" || route.startsWith("bugs/")) {
+    if (req.method === "GET" && route === "bugs") return json(res, 200, { bugs: loadBugs() });
+    if (req.method === "POST" && route === "bugs") {
+      const b = await body(req, readBody);
+      const text = b && typeof b.text === "string" ? b.text.trim().slice(0, 1000) : "";
+      const game = b && typeof b.game === "string" ? b.game.slice(0, 40) : "";
+      if (text.length < 3 || !/^[A-Za-z0-9_-]+$/.test(game)) return json(res, 400, { error: "A report needs a game and some words." });
+      const list = loadBugs();
+      const auto = !!b.auto;
+      // The same crash over and over is one bug.
+      if (auto && list.some((x) => x.auto && x.game === game && x.text === text)) return json(res, 200, { ok: true, dup: true });
+      const from = typeof b.from === "string" ? b.from.slice(0, 24) : "";
+      const bug = { id: crypto.randomBytes(6).toString("hex"), at: Date.now(), game, text, auto, from };
+      saveBugs([...list, bug]);
+      return json(res, 200, { ok: true, id: bug.id });
+    }
+    if (req.method === "DELETE" && route === "bugs") { saveBugs([]); return json(res, 200, { ok: true }); }
+    if (req.method === "DELETE") {
+      const id = route.slice("bugs/".length);
+      saveBugs(loadBugs().filter((x) => x.id !== id));
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { error: "Not allowed." });
+  }
 
   if (req.method === "GET" && route === "discord") {
     const code = String(url.searchParams.get("invite") || "").replace(/^.*\//, "");
