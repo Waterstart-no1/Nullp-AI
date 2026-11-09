@@ -217,34 +217,35 @@
 
   // --------------------------------------------------------------- the model
 
-  // 🎃 Halloween: tell Nullp anything about "treats" and every win in REBUILD and Track Run gives 10%
-  // more candy for the rest of this year's event. Works without the AI (and online), so it is checked
-  // before anything is sent. Same dates and force switch as Monster Attack!'s event.
-  function halloweenOn(d = new Date()) {
+  // 🎄 Christmas: say "santa" to Nullp and Monster Attack! opens 🛷 Santa's Sleigh Road (straight to the ice-castle
+  // boss; beat it to double your snowflakes — once a Christmas). Works without the AI (and online), so it is checked
+  // before anything is sent. Same dates and force switch as Monster Attack!'s event (January = last December's).
+  function christmasOn(d = new Date()) {
     try {
       const f = localStorage.getItem("monster_attack_event_force");
       if (f === "off") return false;
-      if (f) return f === "halloween";
+      if (f) return f === "christmas";
     } catch {}
-    return d.getMonth() === 9 || (d.getMonth() === 10 && d.getDate() <= 7);
+    return d.getMonth() === 11 || (d.getMonth() === 0 && d.getDate() <= 7);
   }
-  function treatCheck(question) {
-    if (!/\btreats?\b/i.test(question) || !halloweenOn()) return false;
-    const key = "monster_attack_hw_treat_" + new Date().getFullYear();
+  function santaCheck(question) {
+    if (!/\bsanta\b/i.test(question) || !christmasOn()) return false;
+    const d = new Date(), y = d.getMonth() === 0 ? d.getFullYear() - 1 : d.getFullYear();
+    const key = "monster_attack_xm_santa_" + y;
     let had = false;
     try { had = localStorage.getItem(key) === "1"; localStorage.setItem(key, "1"); } catch {}
     $("you").textContent = `“${question.trim()}”`;
     $("you").hidden = false;
     renderReply(had
-      ? "[info] 🍬 You already have my treat boost: +10% candy on every win in REBUILD and Track Run this Halloween!"
-      : "[info] 🎃 Trick or treat? TREAT! 🍬 From now on every win in REBUILD and Track Run gives you 10% more candy this Halloween.");
+      ? "[info] 🎅 Ho ho ho! Santa's Sleigh Road is already open — Monster Attack! → Worlds → 🛷"
+      : "[info] 🎅 HO HO HO! You found Santa! 🛷 Santa's Sleigh Road is open in Monster Attack! → Worlds. Ride straight to the ice castle and beat its boss to DOUBLE your ❄️ snowflakes (once this Christmas)!");
     showPanel(true);
     return true;
   }
 
   async function ask(question, opts = {}) {
     if (!question.trim()) return;
-    if (!opts.silentQuestion && treatCheck(question)) return;
+    if (!opts.silentQuestion && santaCheck(question)) return;
     if (busy) {
       pill("talk", "Nullp is still thinking…");
       setTimeout(hidePill, 1600);
