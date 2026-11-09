@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { handleArcade } from "./arcade-accounts.js";
-import { gameKnowledge, codeListAnswer } from "./game-knowledge.js";
+import { gameKnowledge, codeListAnswer, bossAnswer } from "./game-knowledge.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, "public");
@@ -302,7 +302,8 @@ async function handleChat(req, res) {
   });
 
   // "List all the codes" for one of Daniel's games: answered exactly from the game files.
-  const codes = !body.image && codeListAnswer(history, context, GAMES_DIR);
+  // A castle boss, boss pet or boss item named in the question: answered exactly from game-knowledge.js too.
+  const codes = !body.image && (codeListAnswer(history, context, GAMES_DIR) || bossAnswer(history, context));
   if (codes) {
     send(res, "delta", { text: codes });
     send(res, "done", { usage: null, engine: "facts", model: "game files" });
