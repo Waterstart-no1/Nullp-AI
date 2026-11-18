@@ -130,6 +130,14 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     return json(res, 200, await discordInvite(code));
   }
 
+  // 🏆 Leaderboards (anyone can look): every account's latest numbers for a game.
+  if (req.method === "GET" && route === "leaderboard") {
+    const game = String(url.searchParams.get("game") || "");
+    if (!/^[a-z0-9_-]{2,20}$/.test(game)) return json(res, 400, { error: "Bad game." });
+    const players = Object.values(db.users).filter((u) => u.scores && u.scores[game]).map((u) => ({ name: u.name, ...u.scores[game] }));
+    return json(res, 200, { players });
+  }
+
   if (req.method === "POST" && route === "signup") {
     const b = await body(req, readBody);
     if (!b) return json(res, 400, { error: "Bad request." });
@@ -181,6 +189,18 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     me.user.savedAt = Date.now();
     persist();
     return json(res, 200, { ok: true, savedAt: me.user.savedAt });
+  }
+
+  // 🏆 A game sends the logged-in player's numbers for its leaderboard (only whole numbers, only known fields).
+  if (req.method === "POST" && route === "score") {
+    const b = await body(req, readBody);
+    const game = b && String(b.game || "");
+    if (!b || !/^[a-z0-9_-]{2,20}$/.test(game)) return json(res, 400, { error: "Bad score." });
+    const s = { at: Date.now() };
+    for (const k of ["trophies", "rebirths", "prestige", "th"]) s[k] = Math.max(0, Math.min(1e9, Math.floor(Number(b[k]) || 0)));
+    me.user.scores = Object.assign({}, me.user.scores, { [game]: s });
+    persist();
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === "POST" && route === "logout") {
