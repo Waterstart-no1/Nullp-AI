@@ -18,7 +18,7 @@ export function codeHash(str, seed = 67) {
 }
 
 const LOCK = "🔒";
-// Owner-code hashes, read from the games (OWNER_HASH / OWNER_CODE_HASH) plus the one known today.
+// Owner- and admin-code hashes, read from the games (OWNER_HASH / ADMIN_HASH / …_CODE_HASH) plus the one known today.
 const BASE_HASHES = ["1nzwpznwvfj"];
 // Keys and tokens that should never be repeated, wherever they came from.
 const KEY_PATTERNS = [
@@ -64,15 +64,18 @@ export function gameSecrets(root) {
       for (const m of src.matchAll(/['"]([A-Z0-9_]{4,})['"]\s*:\s*\{\s*reward:\s*['"](?:panel|ownerpanel|adminpanel)['"]/g)) out.push(m[1]);
       return out;
     }, "plain"));
-    for (const h of fromFile(file, (src) => [...src.matchAll(/OWNER_(?:CODE_)?HASH\s*=\s*["']([a-z0-9]{6,})["']/g)].map((m) => m[1]), "hash")) hashes.add(h);
+    for (const h of fromFile(file, (src) => [...src.matchAll(/(?:OWNER|ADMIN)_(?:CODE_)?HASH\s*=\s*["']([a-z0-9]{6,})["']/g)].map((m) => m[1]), "hash")) hashes.add(h);
   }
   return { plain: [...plain], hashes: [...hashes] };
 }
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const isOwnerWord = (w, hashes) => {
-  if (w.length < 6 || w.length > 40) return false;
-  for (const v of new Set([w, w.toUpperCase(), w.toLowerCase()])) if (hashes.includes(codeHash(v))) return true;
+  // the word as written, and without punctuation stuck to its ends ("CODE!", "(code)", "code.")
+  for (const base of new Set([w, w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")])) {
+    if (base.length < 6 || base.length > 40) continue;
+    for (const v of new Set([base, base.toUpperCase(), base.toLowerCase()])) if (hashes.includes(codeHash(v))) return true;
+  }
   return false;
 };
 
