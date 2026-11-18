@@ -26,7 +26,10 @@ function monsterCodes(root) {
     if (start < 0) return [];
     const block = src.slice(start, src.indexOf("\n    };", start));
     const out = [];
-    for (const m of block.matchAll(/'([A-Z0-9_]+)'\s*:\s*\{[^}]*?msg:\s*'([^']*)'/g)) out.push(`${m[1]} — ${m[2]}`);
+    for (const m of block.matchAll(/'([A-Z0-9_]+)'\s*:\s*\{([^}]*?)msg:\s*'([^']*)'/g)) {
+      if (/reward:\s*'(?:panel|ownerpanel|adminpanel)'/.test(m[2]) || /\b(admin|owner)\s*panel\b/i.test(m[3])) continue;   // 🔒 never list the panel codes
+      out.push(`${m[1]} — ${m[3]}`);
+    }
     return out;
   });
 }

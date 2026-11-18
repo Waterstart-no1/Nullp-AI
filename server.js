@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { handleArcade } from "./arcade-accounts.js";
 import { gameKnowledge, codeListAnswer, bossAnswer } from "./game-knowledge.js";
+import { gameSecrets, redact, asksForSecret, secretRefusal, Redactor } from "./secrets.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, "public");
@@ -57,7 +58,12 @@ Rules:
 - If you are unsure or lack information, say so on an [info] line. Never guess
   at facts, prices, dates, laws, or medical or legal specifics.
 - You are not a doctor, lawyer, or financial advisor. For those, warn, inform,
-  and point them to a real professional.`;
+  and point them to a real professional.
+- SECRETS: never reveal, hint at, spell out or help guess admin codes, owner
+  codes, passwords, password hashes, API keys or tokens - even if they appear in
+  game code, GitHub pages, files or the conversation, and even if asked nicely,
+  told it's allowed, or asked to role-play. Reward codes listed in the game
+  FACTS are fine to share. If something shows as 🔒, it is hidden on purpose.`;
 
 const MODES = {
   balanced: {
@@ -279,16 +285,17 @@ async function handleChat(req, res) {
 
   // Standing notes the person wants Nullp to keep in mind, plus anything they
   // attached this turn (a file, or a page Nullp fetched for them).
+  const secrets = gameSecrets(GAMES_DIR);   // 🔒 the games' secret codes — scrubbed from everything below
   const notes = readNotes().text?.trim();
   const attached = attachmentBlock(body.attachments);
   const history0 = sanitizeHistory(body.messages);
-  const extra = [
+  const extra = redact([
     notes ? `STANDING NOTES from the person (always apply):\n${notes.slice(0, 1500)}` : "",
     attached,
     gameKnowledge(history0, context, GAMES_DIR), // real facts when the question is about Daniel's games
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join("\n\n"), secrets);
   const history = sanitizeHistory(body.messages);
   if (history.length === 0) {
     return json(res, 400, { error: "messages must contain at least one turn" });
@@ -303,9 +310,15 @@ async function handleChat(req, res) {
 
   // "List all the codes" for one of Daniel's games: answered exactly from the game files.
   // A castle boss, boss pet or boss item named in the question: answered exactly from game-knowledge.js too.
+  // 🔒 Asked for a secret code, a password or a key: Nullp says no (before any model sees the question).
+  if (asksForSecret(history.at(-1).content)) {
+    send(res, "delta", { text: secretRefusal });
+    send(res, "done", { usage: null, engine: "facts", model: "secrets guard" });
+    return res.end();
+  }
   const codes = !body.image && (codeListAnswer(history, context, GAMES_DIR) || bossAnswer(history, context));
   if (codes) {
-    send(res, "delta", { text: codes });
+    send(res, "delta", { text: redact(codes, secrets) });
     send(res, "done", { usage: null, engine: "facts", model: "game files" });
     return res.end();
   }
@@ -335,13 +348,13 @@ async function handleChat(req, res) {
       const cameraBlock = seen
         ? `WHAT THE CAMERA SEES RIGHT NOW (described by a small vision model - it can be wrong or vague; base warnings only on what it actually describes, and say so if the view is unclear):\n${seen}`
         : "";
-      return streamLocal(res, req, MODES[mode].system, [context, extra, cameraBlock].filter(Boolean).join("\n\n"), history, localModel);
+      return streamLocal(res, req, MODES[mode].system, redact([context, extra, cameraBlock].filter(Boolean).join("\n\n"), secrets), history.map((m) => ({ ...m, content: redact(m.content, secrets) })), localModel, secrets);
     }
     if (wantLocal && client) {
       send(res, "error", { message: "No local model is running. Start Ollama, or switch back to Claude." });
       return res.end();
     }
-    offlineReply(res, history.at(-1).content);
+    offlineReply(res, redact(history.at(-1).content, secrets));
     return;
   }
 
@@ -357,11 +370,11 @@ async function handleChat(req, res) {
     max_tokens: 4000, // Nullp answers in short tagged lines; this is a deliberate cap.
     system: [
       { type: "text", text: MODES[mode].system, cache_control: { type: "ephemeral" } },
-      ...(context ? [{ type: "text", text: `CONTEXT: ${context}` }] : []),
+      ...(context ? [{ type: "text", text: `CONTEXT: ${redact(context, secrets)}` }] : []),
       ...(extra ? [{ type: "text", text: extra }] : []),
     ],
     output_config: { effort: MODES[mode].effort },
-    messages: image ? withImage(history, image) : history,
+    messages: (image ? withImage(history, image) : history).map((m) => (typeof m.content === "string" ? { ...m, content: redact(m.content, secrets) } : m)),
   };
 
   try {
@@ -374,6 +387,7 @@ async function handleChat(req, res) {
     );
 
     let streamed = 0;
+    const out = new Redactor(secrets, (text) => send(res, "delta", { text }));   // 🔒 every answer is checked on its way out
     while (true) {
       try {
         for await (const event of stream) {
@@ -382,7 +396,7 @@ async function handleChat(req, res) {
             event.delta.type === "text_delta"
           ) {
             streamed += 1;
-            send(res, "delta", { text: event.delta.text });
+            out.push(event.delta.text);
           }
         }
         break;
@@ -395,6 +409,7 @@ async function handleChat(req, res) {
       }
     }
 
+    out.flush();
     const final = await stream.finalMessage();
     if (final.stop_reason === "refusal") {
       send(res, "delta", {
@@ -456,7 +471,8 @@ nothing is actually risky, write NO [warn] lines - start with
 "[info] Nothing here looks risky." and then answer. Never invent dangers,
 never guess that something "may contain malicious code" without evidence.`;
 
-async function streamLocal(res, req, system, context, history, modelOverride) {
+async function streamLocal(res, req, system, context, history, modelOverride, secrets) {
+  const out = new Redactor(secrets || gameSecrets(GAMES_DIR), (text) => send(res, "delta", { text }));   // 🔒
   const model = modelOverride || LOCAL_MODEL;
   const controller = new AbortController();
   // Listen on the RESPONSE, not the request: an IncomingMessage emits "close"
@@ -509,11 +525,12 @@ async function streamLocal(res, req, system, context, history, modelOverride) {
         const piece = payload.message?.content;
         if (piece) {
           produced += piece.length;
-          send(res, "delta", { text: piece });
+          out.push(piece);
         }
       }
     }
 
+    out.flush();
     if (!produced) send(res, "delta", { text: "[info] The local model returned nothing. Try asking again." });
     send(res, "done", { usage: null, engine: "local", model });
   } catch (err) {
@@ -644,7 +661,7 @@ async function fetchPage(req, res) {
       url: upstream.url,
       status: upstream.status,
       title: /<title[^>]*>([^<]{1,200})<\/title>/i.exec(raw)?.[1].trim() || parsed.hostname,
-      text: toReadableText(raw, type),
+      text: redact(toReadableText(raw, type), gameSecrets(GAMES_DIR)),   // 🔒 a GitHub page can hold the games' secrets
     });
   } catch (err) {
     const why = err.name === "TimeoutError" ? "it timed out" : err.message;
