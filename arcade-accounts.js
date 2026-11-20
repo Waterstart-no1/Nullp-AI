@@ -198,6 +198,7 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     if (!b || !/^[a-z0-9_-]{2,20}$/.test(game)) return json(res, 400, { error: "Bad score." });
     const s = { at: Date.now() };
     for (const k of ["trophies", "rebirths", "prestige", "th"]) s[k] = Math.max(0, Math.min(1e9, Math.floor(Number(b[k]) || 0)));
+    if (typeof b.title === "string") s.title = b.title.replace(/[<>&"]/g, "").slice(0, 40);   // the title they wear
     me.user.scores = Object.assign({}, me.user.scores, { [game]: s });
     persist();
     return json(res, 200, { ok: true });
