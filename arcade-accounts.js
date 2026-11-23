@@ -113,7 +113,7 @@ export function lottoRoll(rnd = Math.random, now = new Date()) {
   if (!L.endsAt) L.endsAt = yearAfter(L.season) || nextYear(now);
   if (+now < L.endsAt) return null;
   const keys = Object.keys(L.tickets).filter((k) => L.tickets[k] > 0), total = keys.reduce((a, k) => a + L.tickets[k], 0);
-  const r = { season: L.season, total, players: keys.length, grand: [], small: [], claimed: {} };
+  const r = { season: L.season, total, players: keys.length, grand: [], small: [], claimed: {}, tickets: { ...L.tickets } };
   if (keys.length >= LOTTO.GRAND_PLAYERS) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.GRAND_CHANCE) { r.grand.push(k); break; }
   if (keys.length < LOTTO.SMALL_UNDER) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.SMALL_CHANCE) { r.small.push(k); break; }
   L.results[L.season] = r; L.last = L.season; L.tickets = {};
@@ -129,7 +129,7 @@ function lottoView(me) {
   return { season: L.season, endsAt: L.endsAt, price: LOTTO.PRICE, players: Object.keys(L.tickets).filter((k) => L.tickets[k] > 0).length, total: Object.values(L.tickets).reduce((a, b) => a + b, 0),
            mine: key ? L.tickets[key] || 0 : 0, rules: LOTTO,
            last: last && { season: last.season, players: last.players, total: last.total, grandWinners: last.grand.map(name), smallWinners: smallOf(last).map(name),
-                           iWonGrand: !!key && last.grand.includes(key), iWonSmall: !!key && smallOf(last).includes(key), claimed: !!(key && last.claimed[key]) } };
+                           iWonGrand: !!key && last.grand.includes(key), iWonSmall: !!key && smallOf(last).includes(key), claimed: !!(key && last.claimed[key]), myTickets: key && last.tickets ? last.tickets[key] || 0 : 0 } };
 }
 export async function handleArcade(req, res, url, { json, readBody }) {
   const route = url.pathname.slice("/api/arcade/".length);

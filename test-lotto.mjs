@@ -29,7 +29,7 @@ const rolls = [0.5, 0.005, 0.5]; let ri = 0;
 const r = lottoRoll(() => (ri < rolls.length ? rolls[ri++] : 0.5));
 check(r && r.players === 2 && r.small.join() === "tester0" && r.grand.length === 0, "new season: under 50 players — tester0 has a lucky ticket and wins 75 points (no Admin draw: under 250 players)", r && r.small);
 v = (await call("GET", "lotto", null, users[0])).obj;
-check(v.last.iWonSmall && !v.last.claimed && v.mine === 0 && v.total === 0, "you can see you won (and the new season starts empty)");
+check(v.last.iWonSmall && !v.last.claimed && v.mine === 0 && v.total === 0 && v.last.myTickets === 3, "you can see you won with your 3 tickets (and the new season starts with 0 tickets)");
 const c1 = (await call("POST", "lotto/claim", null, users[0])).obj;
 check(c1.coins === 75 && !c1.grand && (await call("POST", "lotto/claim", null, users[0])).code === 400, "claim 75 points (once)");
 check((await call("POST", "lotto/claim", null, users[1])).code === 400, "someone who didn't win gets nothing");
