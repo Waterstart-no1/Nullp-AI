@@ -102,7 +102,7 @@ function saveBugs(list) {
 //     in every game and the arcade;
 //   • fewer than 50 players: every player (with a ticket) has a 1% chance to win 75 points — more tickets don't add to it;
 //   • (50–249 players: no draw).
-export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, SMALL_CHANCE: 0.01, MAX_BUY: 20 };
+export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, SMALL_CHANCE: 0.01, MAX_BUY: 1000 };
 export const seasonOf = (d = new Date()) => String(d.getFullYear());
 export const nextYear = (d = new Date()) => new Date(d.getFullYear() + 1, 0, 1).getTime();
 const yearAfter = (season) => { const y = parseInt(season, 10); return y ? new Date(y + 1, 0, 1).getTime() : 0; };

@@ -19,7 +19,7 @@ for (let i = 0; i < 3; i++) users.push((await call("POST", "signup", { name: "te
 let v = (await call("GET", "lotto", null, users[0])).obj;
 check(v.price === 50 && v.mine === 0 && v.players === 0 && v.rules.GRAND_PLAYERS === 250 && v.rules.SMALL_UNDER === 50 && v.rules.GRAND_CHANCE === 1e-29 && v.rules.SMALL_CHANCE === 0.01 && v.season === String(new Date().getFullYear()) && v.endsAt === new Date(new Date().getFullYear() + 1, 0, 1).getTime(), "a lotto season (a year): 50 a ticket, 250 players for the Admin Panel draw, under 50 = a 1% chance a player of 75 points");
 check((await call("POST", "lotto/buy", { n: 1 })).code === 401, "you have to be logged in to buy");
-check((await call("POST", "lotto/buy", { n: 99 }, users[0])).code === 400, "1–20 tickets at a time");
+check((await call("POST", "lotto/buy", { n: 1001 }, users[0])).code === 400 && (await call("POST", "lotto/buy", { n: 0 }, users[0])).code === 400, "1–1000 tickets at a time");
 await call("POST", "lotto/buy", { n: 3 }, users[0]); await call("POST", "lotto/buy", { n: 1 }, users[1]);
 v = (await call("GET", "lotto", null, users[0])).obj;
 check(v.mine === 3 && v.total === 4 && v.players === 2, "tickets count per player (3 + 1, 2 players)");
