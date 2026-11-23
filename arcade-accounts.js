@@ -100,9 +100,9 @@ function saveBugs(list) {
 // calendar month; when a new month starts, last season is drawn:
 //   • 250+ players: every ticket has a 0.000000000000000000000000001% chance (1e-29) to win the 🛠️ Admin Panel
 //     in every game and the arcade;
-//   • fewer than 50 players: one ticket is picked, and its player wins 100 points;
+//   • fewer than 50 players: one ticket is picked, and its player wins 75 points;
 //   • (50–249 players: no draw).
-export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 100, MAX_BUY: 20 };
+export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, MAX_BUY: 20 };
 export const seasonOf = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 export function lottoRoll(rnd = Math.random, now = new Date()) {
   db.lotto = db.lotto || { season: seasonOf(now), tickets: {}, results: {} };
