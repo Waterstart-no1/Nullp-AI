@@ -21,7 +21,7 @@ const fails = new Map(); // key -> { n, until }
 function loadDb() {
   try {
     const d = JSON.parse(fs.readFileSync(FILE, "utf8"));
-    return { users: d.users || {}, sessions: d.sessions || {} };
+    return { users: d.users || {}, sessions: d.sessions || {}, lotto: d.lotto };
   } catch {
     return { users: {}, sessions: {} };
   }
@@ -96,6 +96,33 @@ function saveBugs(list) {
 }
 
 /** Handles /api/arcade/*. Returns the response it sent. */
+// 🎟️ LOTTO: a ticket costs 50 arcade points (the game takes them; the server keeps the tickets). A season is a
+// calendar month; when a new month starts, last season is drawn:
+//   • 250+ players: every ticket has a 0.000000000000000000000000001% chance (1e-29) to win the 🛠️ Admin Panel
+//     in every game and the arcade;
+//   • fewer than 50 players: one ticket is picked, and its player wins 100 points;
+//   • (50–249 players: no draw).
+export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 100, MAX_BUY: 20 };
+export const seasonOf = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+export function lottoRoll(rnd = Math.random, now = new Date()) {
+  db.lotto = db.lotto || { season: seasonOf(now), tickets: {}, results: {} };
+  const L = db.lotto; if (L.season === seasonOf(now)) return null;
+  const keys = Object.keys(L.tickets).filter((k) => L.tickets[k] > 0), total = keys.reduce((a, k) => a + L.tickets[k], 0);
+  const r = { season: L.season, total, players: keys.length, grand: [], small: null, claimed: {} };
+  if (keys.length >= LOTTO.GRAND_PLAYERS) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.GRAND_CHANCE) { r.grand.push(k); break; }
+  if (keys.length > 0 && keys.length < LOTTO.SMALL_UNDER) { let x = rnd() * total; for (const k of keys) { x -= L.tickets[k]; if (x < 0) { r.small = k; break; } } r.small = r.small || keys[keys.length - 1]; }
+  L.results[L.season] = r; L.last = L.season; L.season = seasonOf(now); L.tickets = {};
+  persist(); return r;
+}
+export const _testDb = () => db;   // (tests only)
+function lottoView(me) {
+  lottoRoll();
+  const L = db.lotto, last = L.last ? L.results[L.last] : null, key = me && me.key, name = (k) => (db.users[k] ? db.users[k].name : "?");
+  return { season: L.season, price: LOTTO.PRICE, players: Object.keys(L.tickets).filter((k) => L.tickets[k] > 0).length, total: Object.values(L.tickets).reduce((a, b) => a + b, 0),
+           mine: key ? L.tickets[key] || 0 : 0, rules: LOTTO,
+           last: last && { season: last.season, players: last.players, total: last.total, grandWinners: last.grand.map(name), smallWinner: last.small ? name(last.small) : null,
+                           iWonGrand: !!key && last.grand.includes(key), iWonSmall: !!key && last.small === key, claimed: !!(key && last.claimed[key]) } };
+}
 export async function handleArcade(req, res, url, { json, readBody }) {
   const route = url.pathname.slice("/api/arcade/".length);
 
@@ -129,6 +156,8 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     if (!/^[A-Za-z0-9-]{2,32}$/.test(code)) return json(res, 400, { error: "Bad invite." });
     return json(res, 200, await discordInvite(code));
   }
+
+  if (req.method === "GET" && route === "lotto") return json(res, 200, lottoView(userFromToken(req)));   // 🎟️ (anyone can look)
 
   // 🏆 Leaderboards (anyone can look): every account's latest numbers for a game.
   if (req.method === "GET" && route === "leaderboard") {
@@ -202,6 +231,22 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     me.user.scores = Object.assign({}, me.user.scores, { [game]: s });
     persist();
     return json(res, 200, { ok: true });
+  }
+
+  // 🎟️ buy tickets (the game has already checked and taken the points) / claim last season's prize
+  if (req.method === "POST" && route === "lotto/buy") {
+    const b = await body(req, readBody); const n = Math.floor(Number(b && b.n) || 0);
+    if (n < 1 || n > LOTTO.MAX_BUY) return json(res, 400, { error: `Buy 1–${LOTTO.MAX_BUY} tickets at a time.` });
+    lottoRoll(); db.lotto.tickets[me.key] = (db.lotto.tickets[me.key] || 0) + n; persist();
+    return json(res, 200, lottoView(me));
+  }
+  if (req.method === "POST" && route === "lotto/claim") {
+    lottoRoll(); const L = db.lotto, last = L.last ? L.results[L.last] : null;
+    if (!last || last.claimed[me.key]) return json(res, 400, { error: "Nothing to claim." });
+    const grand = last.grand.includes(me.key), coins = last.small === me.key ? LOTTO.SMALL_PRIZE : 0;
+    if (!grand && !coins) return json(res, 400, { error: "No prize this time." });
+    last.claimed[me.key] = true; persist();
+    return json(res, 200, { grand, coins });
   }
 
   if (req.method === "POST" && route === "logout") {
