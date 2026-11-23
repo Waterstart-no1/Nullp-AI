@@ -61,9 +61,11 @@ db.lotto.tickets = {}; for (let i = 0; i < 40; i++) db.lotto.tickets["w" + i] = 
 let wins = 0; for (let t = 0; t < 50; t++) { for (let i = 0; i < 40; i++) db.lotto.tickets["w" + i] = 20; db.lotto.season = "y" + t; db.lotto.endsAt = 1; wins += lottoRoll(Math.random).small.length; }
 check(wins > 300 && wins < 450, "with 20 tickets each, about 18% of players win (1% a ticket)", wins + " of 2000");
 // an old season (from when seasons were months) moves to the end of its year
-db.lotto.yearly = false; db.lotto.season = "2026-11"; db.lotto.endsAt = new Date(2026, 11, 1).getTime();
-lottoRoll(() => 0.5, new Date(2026, 10, 25));
-check(db.lotto.endsAt === new Date(2027, 0, 1).getTime() && db.lotto.yearly, "an old month season now ends at the end of the year");
+db.lotto.yearly = false; db.lotto.season = "2031-11"; db.lotto.endsAt = new Date(2031, 11, 1).getTime();
+lottoRoll(() => 0.5, new Date(2031, 10, 25));
+check(db.lotto.endsAt === new Date(2032, 0, 1).getTime() && db.lotto.yearly && db.lotto.season === "2031", "an old month season (2031-11) is now season 2031 and ends at the end of the year", db.lotto.season);
+db.lotto.season = "2033-05"; lottoRoll(() => 0.5, new Date(2031, 10, 26));
+check(db.lotto.season === "2033", "an already-yearly season with a month name is renamed too");
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(ok ? "\nLOTTO PASS" : "\nLOTTO FAIL");
 process.exit(ok ? 0 : 1);

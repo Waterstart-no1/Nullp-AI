@@ -109,7 +109,10 @@ const yearAfter = (season) => { const y = parseInt(season, 10); return y ? new D
 export function lottoRoll(rnd = Math.random, now = new Date()) {
   db.lotto = db.lotto || { season: seasonOf(now), tickets: {}, results: {} };
   const L = db.lotto;
-  if (!L.yearly) { L.yearly = true; L.endsAt = Math.max(L.endsAt || 0, yearAfter(L.season) || nextYear(now)); }   // (seasons used to be months)
+  if (!L.yearly) {   // (seasons used to be months: "2026-11" → "2026", ending with the year)
+    L.yearly = true; L.endsAt = Math.max(L.endsAt || 0, yearAfter(L.season) || nextYear(now));
+  }
+  if (/^\d{4}-\d{2}$/.test(L.season) && !L.results[L.season.slice(0, 4)]) L.season = L.season.slice(0, 4);   // "2026-11" → "2026"
   if (!L.endsAt) L.endsAt = yearAfter(L.season) || nextYear(now);
   if (+now < L.endsAt) return null;
   const keys = Object.keys(L.tickets).filter((k) => L.tickets[k] > 0), total = keys.reduce((a, k) => a + L.tickets[k], 0);
