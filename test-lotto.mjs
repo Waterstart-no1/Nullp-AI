@@ -17,17 +17,17 @@ const users = [];
 for (let i = 0; i < 3; i++) users.push((await call("POST", "signup", { name: "tester" + i, password: "pass" + i })).obj.token);
 
 let v = (await call("GET", "lotto", null, users[0])).obj;
-check(v.price === 50 && v.mine === 0 && v.players === 0 && v.rules.GRAND_PLAYERS === 250 && v.rules.SMALL_UNDER === 50 && v.rules.GRAND_CHANCE === 1e-29 && v.rules.SMALL_CHANCE === 0.01 && v.season === String(new Date().getFullYear()) && v.endsAt === new Date(new Date().getFullYear() + 1, 0, 1).getTime(), "a lotto season (a year): 50 a ticket, 250 players for the Admin Panel draw, under 50 = a 1% chance a ticket of 75 points");
+check(v.price === 50 && v.mine === 0 && v.players === 0 && v.rules.GRAND_PLAYERS === 250 && v.rules.SMALL_UNDER === 50 && v.rules.GRAND_CHANCE === 1e-29 && v.rules.SMALL_CHANCE === 0.01 && v.season === String(new Date().getFullYear()) && v.endsAt === new Date(new Date().getFullYear() + 1, 0, 1).getTime(), "a lotto season (a year): 50 a ticket, 250 players for the Admin Panel draw, under 50 = a 1% chance a player of 75 points");
 check((await call("POST", "lotto/buy", { n: 1 })).code === 401, "you have to be logged in to buy");
 check((await call("POST", "lotto/buy", { n: 99 }, users[0])).code === 400, "1–20 tickets at a time");
 await call("POST", "lotto/buy", { n: 3 }, users[0]); await call("POST", "lotto/buy", { n: 1 }, users[1]);
 v = (await call("GET", "lotto", null, users[0])).obj;
 check(v.mine === 3 && v.total === 4 && v.players === 2, "tickets count per player (3 + 1, 2 players)");
-// the season ends: fewer than 50 players → each ticket has a 1% chance (tester0's 2nd ticket rolls lucky: 0.005)
+// the season ends: fewer than 50 players → each player has a 1% chance (tester0 rolls lucky: 0.005, tester1 doesn't)
 const db = _testDb(); db.lotto.season = "2000"; db.lotto.endsAt = 1;
-const rolls = [0.5, 0.005, 0.5]; let ri = 0;
+const rolls = [0.005, 0.5]; let ri = 0;
 const r = lottoRoll(() => (ri < rolls.length ? rolls[ri++] : 0.5));
-check(r && r.players === 2 && r.small.join() === "tester0" && r.grand.length === 0, "new season: under 50 players — tester0 has a lucky ticket and wins 75 points (no Admin draw: under 250 players)", r && r.small);
+check(r && r.players === 2 && r.small.join() === "tester0" && r.grand.length === 0, "new season: under 50 players — tester0 is lucky and wins 75 points (no Admin draw: under 250 players)", r && r.small);
 v = (await call("GET", "lotto", null, users[0])).obj;
 check(v.last.iWonSmall && !v.last.claimed && v.mine === 0 && v.total === 0 && v.last.myTickets === 3, "you can see you won with your 3 tickets (and the new season starts with 0 tickets)");
 const c1 = (await call("POST", "lotto/claim", null, users[0])).obj;
@@ -56,10 +56,9 @@ v = (await call("GET", "lotto", null, users[0])).obj;
 check(v.total === 0 && v.endsAt > Date.now(), "…and the next season ends at the end of the year (not drawn again)");
 v = (await call("POST", "lotto/schedule", { yearly: true }, users[0])).obj;
 check(v.endsAt === new Date(new Date().getFullYear() + 1, 0, 1).getTime(), "“Yearly” puts it back to the end of the year");
-// 1% a ticket: about 100 winners from 10,000 tickets (under 50 players: 40 players × 250 tickets)
-db.lotto.tickets = {}; for (let i = 0; i < 40; i++) db.lotto.tickets["w" + i] = 20; db.lotto.season = "2004"; db.lotto.endsAt = 1;
-let wins = 0; for (let t = 0; t < 50; t++) { for (let i = 0; i < 40; i++) db.lotto.tickets["w" + i] = 20; db.lotto.season = "y" + t; db.lotto.endsAt = 1; wins += lottoRoll(Math.random).small.length; }
-check(wins > 300 && wins < 450, "with 20 tickets each, about 18% of players win (1% a ticket)", wins + " of 2000");
+// 1% a player, however many tickets: 2,000 player-draws (40 players × 50 seasons, 20 tickets each) → about 20 winners
+let wins = 0; for (let t = 0; t < 50; t++) { db.lotto.tickets = {}; for (let i = 0; i < 40; i++) db.lotto.tickets["w" + i] = 20; db.lotto.season = "y" + t; db.lotto.endsAt = 1; wins += lottoRoll(Math.random).small.length; }
+check(wins >= 5 && wins <= 45, "1% a player — 20 tickets don't make it 20×", wins + " of 2000");
 // an old season (from when seasons were months) moves to the end of its year
 db.lotto.yearly = false; db.lotto.season = "2031-11"; db.lotto.endsAt = new Date(2031, 11, 1).getTime();
 lottoRoll(() => 0.5, new Date(2031, 10, 25));

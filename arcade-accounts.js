@@ -100,7 +100,7 @@ function saveBugs(list) {
 // year; when it ends (or at the time an admin picked: POST lotto/schedule) the season is drawn:
 //   • 250+ players: every ticket has a 0.000000000000000000000000001% chance (1e-29) to win the 🛠️ Admin Panel
 //     in every game and the arcade;
-//   • fewer than 50 players: every ticket has a 1% chance to win its player 75 points (once per player);
+//   • fewer than 50 players: every player (with a ticket) has a 1% chance to win 75 points — more tickets don't add to it;
 //   • (50–249 players: no draw).
 export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, SMALL_CHANCE: 0.01, MAX_BUY: 20 };
 export const seasonOf = (d = new Date()) => String(d.getFullYear());
@@ -118,7 +118,7 @@ export function lottoRoll(rnd = Math.random, now = new Date()) {
   const keys = Object.keys(L.tickets).filter((k) => L.tickets[k] > 0), total = keys.reduce((a, k) => a + L.tickets[k], 0);
   const r = { season: L.season, total, players: keys.length, grand: [], small: [], claimed: {}, tickets: { ...L.tickets } };
   if (keys.length >= LOTTO.GRAND_PLAYERS) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.GRAND_CHANCE) { r.grand.push(k); break; }
-  if (keys.length < LOTTO.SMALL_UNDER) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.SMALL_CHANCE) { r.small.push(k); break; }
+  if (keys.length < LOTTO.SMALL_UNDER) for (const k of keys) if (rnd() < LOTTO.SMALL_CHANCE) r.small.push(k);   // 1% a player
   L.results[L.season] = r; L.last = L.season; L.tickets = {};
   let s = seasonOf(now); for (let i = 2; L.results[s]; i++) s = `${seasonOf(now)}-${i}`;   // (a 2nd draw in the same year)
   L.season = s; L.endsAt = nextYear(now);
