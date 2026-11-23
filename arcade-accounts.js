@@ -97,31 +97,39 @@ function saveBugs(list) {
 
 /** Handles /api/arcade/*. Returns the response it sent. */
 // 🎟️ LOTTO: a ticket costs 50 arcade points (the game takes them; the server keeps the tickets). A season is a
-// calendar month; when a new month starts, last season is drawn:
+// year; when it ends (or at the time an admin picked: POST lotto/schedule) the season is drawn:
 //   • 250+ players: every ticket has a 0.000000000000000000000000001% chance (1e-29) to win the 🛠️ Admin Panel
 //     in every game and the arcade;
-//   • fewer than 50 players: one ticket is picked, and its player wins 75 points;
+//   • fewer than 50 players: every ticket has a 1% chance to win its player 75 points (once per player);
 //   • (50–249 players: no draw).
-export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, MAX_BUY: 20 };
-export const seasonOf = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+export const LOTTO = { PRICE: 50, GRAND_CHANCE: 1e-29, GRAND_PLAYERS: 250, SMALL_UNDER: 50, SMALL_PRIZE: 75, SMALL_CHANCE: 0.01, MAX_BUY: 20 };
+export const seasonOf = (d = new Date()) => String(d.getFullYear());
+export const nextYear = (d = new Date()) => new Date(d.getFullYear() + 1, 0, 1).getTime();
+const yearAfter = (season) => { const y = parseInt(season, 10); return y ? new Date(y + 1, 0, 1).getTime() : 0; };
 export function lottoRoll(rnd = Math.random, now = new Date()) {
   db.lotto = db.lotto || { season: seasonOf(now), tickets: {}, results: {} };
-  const L = db.lotto; if (L.season === seasonOf(now)) return null;
+  const L = db.lotto;
+  if (!L.yearly) { L.yearly = true; L.endsAt = Math.max(L.endsAt || 0, yearAfter(L.season) || nextYear(now)); }   // (seasons used to be months)
+  if (!L.endsAt) L.endsAt = yearAfter(L.season) || nextYear(now);
+  if (+now < L.endsAt) return null;
   const keys = Object.keys(L.tickets).filter((k) => L.tickets[k] > 0), total = keys.reduce((a, k) => a + L.tickets[k], 0);
-  const r = { season: L.season, total, players: keys.length, grand: [], small: null, claimed: {} };
+  const r = { season: L.season, total, players: keys.length, grand: [], small: [], claimed: {} };
   if (keys.length >= LOTTO.GRAND_PLAYERS) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.GRAND_CHANCE) { r.grand.push(k); break; }
-  if (keys.length > 0 && keys.length < LOTTO.SMALL_UNDER) { let x = rnd() * total; for (const k of keys) { x -= L.tickets[k]; if (x < 0) { r.small = k; break; } } r.small = r.small || keys[keys.length - 1]; }
-  L.results[L.season] = r; L.last = L.season; L.season = seasonOf(now); L.tickets = {};
+  if (keys.length < LOTTO.SMALL_UNDER) for (const k of keys) for (let i = 0; i < Math.min(L.tickets[k], 1e6); i++) if (rnd() < LOTTO.SMALL_CHANCE) { r.small.push(k); break; }
+  L.results[L.season] = r; L.last = L.season; L.tickets = {};
+  let s = seasonOf(now); for (let i = 2; L.results[s]; i++) s = `${seasonOf(now)}-${i}`;   // (a 2nd draw in the same year)
+  L.season = s; L.endsAt = nextYear(now);
   persist(); return r;
 }
 export const _testDb = () => db;   // (tests only)
+const smallOf = (r) => (Array.isArray(r.small) ? r.small : r.small ? [r.small] : []);   // (older draws had one winner)
 function lottoView(me) {
   lottoRoll();
   const L = db.lotto, last = L.last ? L.results[L.last] : null, key = me && me.key, name = (k) => (db.users[k] ? db.users[k].name : "?");
-  return { season: L.season, price: LOTTO.PRICE, players: Object.keys(L.tickets).filter((k) => L.tickets[k] > 0).length, total: Object.values(L.tickets).reduce((a, b) => a + b, 0),
+  return { season: L.season, endsAt: L.endsAt, price: LOTTO.PRICE, players: Object.keys(L.tickets).filter((k) => L.tickets[k] > 0).length, total: Object.values(L.tickets).reduce((a, b) => a + b, 0),
            mine: key ? L.tickets[key] || 0 : 0, rules: LOTTO,
-           last: last && { season: last.season, players: last.players, total: last.total, grandWinners: last.grand.map(name), smallWinner: last.small ? name(last.small) : null,
-                           iWonGrand: !!key && last.grand.includes(key), iWonSmall: !!key && last.small === key, claimed: !!(key && last.claimed[key]) } };
+           last: last && { season: last.season, players: last.players, total: last.total, grandWinners: last.grand.map(name), smallWinners: smallOf(last).map(name),
+                           iWonGrand: !!key && last.grand.includes(key), iWonSmall: !!key && smallOf(last).includes(key), claimed: !!(key && last.claimed[key]) } };
 }
 export async function handleArcade(req, res, url, { json, readBody }) {
   const route = url.pathname.slice("/api/arcade/".length);
@@ -240,10 +248,19 @@ export async function handleArcade(req, res, url, { json, readBody }) {
     lottoRoll(); db.lotto.tickets[me.key] = (db.lotto.tickets[me.key] || 0) + n; persist();
     return json(res, 200, lottoView(me));
   }
+  // 🛠️ Admin Panel: pick when this season is drawn — { at: <time> }, { now: true } or { yearly: true }
+  if (req.method === "POST" && route === "lotto/schedule") {
+    const b = (await body(req, readBody)) || {}; lottoRoll(); const L = db.lotto, at = Number(b.at);
+    if (b.now) L.endsAt = Date.now();
+    else if (b.yearly) L.endsAt = nextYear();
+    else if (at > Date.now() && at < Date.now() + 5 * 366 * 864e5) L.endsAt = Math.floor(at);
+    else return json(res, 400, { error: "Pick a time in the future." });
+    persist(); lottoRoll(); return json(res, 200, lottoView(me));
+  }
   if (req.method === "POST" && route === "lotto/claim") {
     lottoRoll(); const L = db.lotto, last = L.last ? L.results[L.last] : null;
     if (!last || last.claimed[me.key]) return json(res, 400, { error: "Nothing to claim." });
-    const grand = last.grand.includes(me.key), coins = last.small === me.key ? LOTTO.SMALL_PRIZE : 0;
+    const grand = last.grand.includes(me.key), coins = smallOf(last).includes(me.key) ? LOTTO.SMALL_PRIZE : 0;
     if (!grand && !coins) return json(res, 400, { error: "No prize this time." });
     last.claimed[me.key] = true; persist();
     return json(res, 200, { grand, coins });
